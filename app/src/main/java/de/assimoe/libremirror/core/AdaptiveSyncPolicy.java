@@ -28,10 +28,8 @@ public final class AdaptiveSyncPolicy {
         }
 
         boolean foreground = prefs.getBoolean("ui_foreground", false);
-        long foregroundSeenMs = prefs.getLong("ui_foreground_seen_ms", 0L);
 
-        if (foreground
-                && System.currentTimeMillis() - foregroundSeenMs < 90_000L) {
+        if (foreground) {
             return new Decision(
                     ONE_MINUTE_MS,
                     "App geöffnet"
