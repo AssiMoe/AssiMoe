@@ -41,6 +41,7 @@ public class MainActivity extends Activity {
     private static final int BLUE_DARK = 0xFF06366F;
     private static final int GREEN = 0xFF078B5B;
     private static final int RED = 0xFFD64848;
+    private static final int ORANGE = 0xFFB57800;
     private static final int PAGE_BG = 0xFFF6FAFF;
     private static final int FIELD_BG = 0xFFF7FAFE;
     private static final int BORDER = 0xFFDCE8F4;
@@ -49,7 +50,6 @@ public class MainActivity extends Activity {
     private EditText password;
     private EditText low;
     private EditText high;
-    private EditText twoFactorCode;
     private Spinner region;
     private Switch carVoice;
 
@@ -59,20 +59,21 @@ public class MainActivity extends Activity {
     private TextView trendLabelView;
     private TextView connectionChip;
     private TextView updatedView;
+    private TextView sensorAgeView;
+    private TextView patientView;
     private TextView errorView;
+    private TextView serviceStatusView;
     private Button startButton;
-    private Button termsButton;
-    private Button verifyTwoFactorButton;
-    private Button resendTwoFactorButton;
-    private LinearLayout twoFactorBox;
+    private Button refreshButton;
     private GlucoseChartView chartView;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+
     private final Runnable refreshUi = new Runnable() {
         @Override
         public void run() {
-            renderLastReading();
-            handler.postDelayed(this, 2000);
+            renderState();
+            handler.postDelayed(this, 2000L);
         }
     };
 
@@ -85,16 +86,19 @@ public class MainActivity extends Activity {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                            | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
             );
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            );
         }
 
         setContentView(buildUi());
         loadSettings();
         requestNotificationPermission();
-        renderLastReading();
+        renderState();
     }
 
     private View buildUi() {
@@ -105,25 +109,26 @@ public class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(16), dp(18), dp(28));
+        root.setPadding(dp(18), dp(16), dp(18), dp(30));
         scroll.addView(root);
 
         root.addView(buildHeader());
         root.addView(buildGlucoseCard(), fullTop(18));
-        root.addView(buildCloudInfoCard(), fullTop(16));
+        root.addView(buildSourceCard(), fullTop(16));
         root.addView(buildLoginCard(), fullTop(16));
         root.addView(buildWarningCard(), fullTop(16));
         root.addView(buildActionArea(), fullTop(18));
 
-        TextView foot = text(
-                "Private Testversion • Direkter LibreView-Cloud-Abruf ohne Juggluco/LibreLinkUp-App • Für Therapieentscheidungen weiterhin die offizielle Libre-App verwenden.",
+        TextView footer = text(
+                "Private LibreMirror-Version • Daten werden ausschließlich zwischen deinem Gerät und Abbott/LibreView übertragen. "
+                        + "Nicht als alleinige Grundlage für Therapie- oder Dosierungsentscheidungen verwenden.",
                 11,
                 false,
                 0xFF6E7F95
         );
-        foot.setGravity(Gravity.CENTER);
-        foot.setLineSpacing(0, 1.15f);
-        root.addView(foot, fullTop(18));
+        footer.setGravity(Gravity.CENTER);
+        footer.setLineSpacing(0, 1.15f);
+        root.addView(footer, fullTop(20));
 
         return scroll;
     }
@@ -142,11 +147,21 @@ public class MainActivity extends Activity {
         titles.setPadding(dp(12), 0, 0, 0);
 
         titles.addView(text("LibreMirror", 28, true, 0xFF071B3E));
-        titles.addView(text("Libre Cloud  →  Handy  →  Smartwatch", 14, false, 0xFF5D7596), wrapTop(2));
+        titles.addView(
+                text("Libre 3  →  Cloud  →  Watch", 14, false, 0xFF5D7596),
+                wrapTop(2)
+        );
 
-        row.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(
+                titles,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
 
-        TextView version = text("0.4.2", 12, true, BLUE);
+        TextView version = text(BuildConfig.VERSION_NAME, 11, true, BLUE);
         version.setGravity(Gravity.CENTER);
         version.setBackground(rounded(0xFFE7F3FF, 18));
         version.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -162,11 +177,18 @@ public class MainActivity extends Activity {
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView overline = text("GLUKOSE (LIBREVIEW REPORT)", 12, true, 0xFF58759A);
+        TextView overline = text("GLUKOSE LIVE", 12, true, 0xFF58759A);
         overline.setLetterSpacing(0.08f);
-        titleRow.addView(overline, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        titleRow.addView(
+                overline,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
 
-        TextView source = text("REPORT", 10, true, BLUE);
+        TextView source = text("LIBRELINKUP", 10, true, BLUE);
         source.setPadding(dp(10), dp(5), dp(10), dp(5));
         source.setBackground(rounded(0xFFE5F3FF, 15));
         titleRow.addView(source);
@@ -176,7 +198,7 @@ public class MainActivity extends Activity {
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.HORIZONTAL);
         main.setGravity(Gravity.CENTER_VERTICAL);
-        card.addView(main, fullTop(6));
+        card.addView(main, fullTop(8));
 
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
@@ -201,7 +223,14 @@ public class MainActivity extends Activity {
         connectionChip.setBackground(rounded(0xFFFFEBEE, 18));
         left.addView(connectionChip, wrapTop(8));
 
-        main.addView(left, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        main.addView(
+                left,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
 
         LinearLayout trend = new LinearLayout(this);
         trend.setOrientation(LinearLayout.VERTICAL);
@@ -209,114 +238,111 @@ public class MainActivity extends Activity {
 
         trendArrowView = text("→", 54, false, GREEN);
         trendArrowView.setGravity(Gravity.CENTER);
-        trend.addView(trendArrowView, new LinearLayout.LayoutParams(dp(88), dp(64)));
+        trend.addView(
+                trendArrowView,
+                new LinearLayout.LayoutParams(dp(88), dp(64))
+        );
 
-        trendLabelView = text("Trend", 14, true, GREEN);
+        trendLabelView = text("Kein Wert", 14, true, GREEN);
         trendLabelView.setGravity(Gravity.CENTER);
         trend.addView(trendLabelView);
 
-        main.addView(trend, new LinearLayout.LayoutParams(dp(96), LinearLayout.LayoutParams.WRAP_CONTENT));
+        main.addView(
+                trend,
+                new LinearLayout.LayoutParams(
+                        dp(100),
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
 
         chartView = new GlucoseChartView(this);
-        card.addView(chartView, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(86)
-        ));
+        card.addView(
+                chartView,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(92)
+                )
+        );
 
-        updatedView = text("Letzte Aktualisierung: —", 12, false, 0xFF607998);
-        card.addView(updatedView, wrapTop(2));
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        card.addView(statusRow, fullTop(6));
+
+        updatedView = text("Sync: —", 12, false, 0xFF607998);
+        statusRow.addView(
+                updatedView,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
+        sensorAgeView = text("Sensor: —", 12, false, 0xFF607998);
+        sensorAgeView.setGravity(Gravity.END);
+        statusRow.addView(sensorAgeView);
 
         errorView = text("", 12, false, RED);
         errorView.setVisibility(View.GONE);
-        card.addView(errorView, wrapTop(5));
-
-        termsButton = new Button(this);
-        termsButton.setText("LibreView-Bedingungen bestätigen");
-        termsButton.setTextSize(14);
-        termsButton.setTextColor(Color.WHITE);
-        termsButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        termsButton.setAllCaps(false);
-        termsButton.setBackground(gradientButton());
-        termsButton.setVisibility(View.GONE);
-        termsButton.setOnClickListener(v -> confirmTermsAcceptance());
-        card.addView(termsButton, fullHeightTop(52, 10));
-
-        twoFactorBox = new LinearLayout(this);
-        twoFactorBox.setOrientation(LinearLayout.VERTICAL);
-        twoFactorBox.setPadding(dp(14), dp(14), dp(14), dp(14));
-        twoFactorBox.setBackground(roundedWithStroke(0xFFF3F9FF, 0xFF9CCCF6, 18));
-        twoFactorBox.setVisibility(View.GONE);
-
-        TextView twoFaTitle = text("LibreView Zwei-Faktor-Bestätigung", 15, true, 0xFF0B1D3D);
-        twoFactorBox.addView(twoFaTitle);
-
-        TextView twoFaText = text(
-                "Abbott hat einen Bestätigungscode per E-Mail gesendet. Gib den Code hier ein.",
-                12,
-                false,
-                0xFF607998
-        );
-        twoFaText.setLineSpacing(dp(1), 1.08f);
-        twoFactorBox.addView(twoFaText, wrapTop(4));
-
-        twoFactorCode = field("Bestätigungscode", InputType.TYPE_CLASS_NUMBER);
-        twoFactorCode.setTextSize(22);
-        twoFactorCode.setGravity(Gravity.CENTER);
-        twoFactorBox.addView(twoFactorCode, fullTop(10));
-
-        verifyTwoFactorButton = new Button(this);
-        verifyTwoFactorButton.setText("Code bestätigen");
-        verifyTwoFactorButton.setTextSize(14);
-        verifyTwoFactorButton.setTextColor(Color.WHITE);
-        verifyTwoFactorButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        verifyTwoFactorButton.setAllCaps(false);
-        verifyTwoFactorButton.setBackground(gradientButton());
-        verifyTwoFactorButton.setOnClickListener(v -> verifyTwoFactor());
-        twoFactorBox.addView(verifyTwoFactorButton, fullHeightTop(52, 10));
-
-        resendTwoFactorButton = new Button(this);
-        resendTwoFactorButton.setText("Neuen Code senden");
-        resendTwoFactorButton.setTextSize(13);
-        resendTwoFactorButton.setTextColor(BLUE);
-        resendTwoFactorButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        resendTwoFactorButton.setAllCaps(false);
-        resendTwoFactorButton.setBackground(roundedWithStroke(Color.TRANSPARENT, 0xFF84BEF5, 16));
-        resendTwoFactorButton.setOnClickListener(v -> resendTwoFactor());
-        twoFactorBox.addView(resendTwoFactorButton, fullHeightTop(48, 8));
-
-        card.addView(twoFactorBox, fullTop(10));
+        errorView.setLineSpacing(dp(1), 1.08f);
+        card.addView(errorView, fullTop(8));
 
         return card;
     }
 
-    private View buildCloudInfoCard() {
+    private View buildSourceCard() {
         LinearLayout card = card(false);
 
-        card.addView(sectionHeader(
-                android.R.drawable.ic_menu_upload,
-                "Datenquelle",
-                "Aus deinem eigenen LibreView-Personalkonto.",
-                text("", 1, false, Color.TRANSPARENT)
-        ));
-
-        TextView route = text(
-                "Libre 3 Sensor  →  offizielle Libre-App  →  LibreView Cloud  →  LibreMirror",
-                13,
-                true,
-                0xFF183B6B
+        card.addView(
+                sectionHeader(
+                        android.R.drawable.ic_menu_share,
+                        "Datenquelle",
+                        "Stabiler LibreLinkUp-Follower-Livezugriff.",
+                        text("", 1, false, Color.TRANSPARENT)
+                )
         );
+
+        LinearLayout route = new LinearLayout(this);
+        route.setOrientation(LinearLayout.VERTICAL);
         route.setPadding(dp(14), dp(12), dp(14), dp(12));
         route.setBackground(roundedWithStroke(FIELD_BG, BORDER, 16));
+
+        route.addView(
+                text(
+                        "Libre 3 Sensor  →  offizielle Libre-App  →  Abbott Cloud",
+                        13,
+                        true,
+                        0xFF183B6B
+                )
+        );
+        route.addView(
+                text(
+                        "→  LibreLinkUp-Freigabe  →  LibreMirror",
+                        13,
+                        true,
+                        0xFF183B6B
+                ),
+                wrapTop(4)
+        );
+
         card.addView(route, fullTop(12));
 
         TextView note = text(
-                "Keine Juggluco-App und keine LibreLinkUp-App nötig. LibreMirror liest den Daily-Log-Bericht deines persönlichen LibreView-Kontos. Automatische Aktualisierung etwa alle 5 Minuten.",
+                "LibreLinkUp muss nur einmal für Konto/Freigabe eingerichtet und die Einladung angenommen werden. "
+                        + "Danach kann die LibreLinkUp-App wieder deinstalliert werden; LibreMirror fragt die Freigabe direkt ab.",
                 12,
                 false,
                 0xFF607998
         );
         note.setLineSpacing(dp(2), 1.12f);
         card.addView(note, fullTop(10));
+
+        patientView = text("Freigabe: —", 12, true, 0xFF526A8A);
+        card.addView(patientView, fullTop(10));
+
+        serviceStatusView = text("Live-Dienst: aus", 12, true, 0xFF526A8A);
+        card.addView(serviceStatusView, fullTop(5));
 
         return card;
     }
@@ -327,16 +353,21 @@ public class MainActivity extends Activity {
         content.setOrientation(LinearLayout.VERTICAL);
 
         TextView chevron = text("⌃", 22, true, 0xFF5D7596);
+
         LinearLayout header = sectionHeader(
                 android.R.drawable.ic_menu_myplaces,
-                "LibreView / Libre 3 Login",
-                "Mit deinem normalen LibreView-Konto anmelden.",
+                "LibreLinkUp Konto",
+                "Follower-Konto für die bestehende Freigabe.",
                 chevron
         );
+
         card.addView(header);
         card.addView(content, fullTop(12));
 
-        email = field("E-Mail-Adresse", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        email = field(
+                "Follower-E-Mail-Adresse",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+        );
         content.addView(email);
 
         LinearLayout passwordWrap = new LinearLayout(this);
@@ -355,26 +386,40 @@ public class MainActivity extends Activity {
         password.setTextColor(0xFF142847);
         password.setSingleLine(true);
         password.setBackgroundColor(Color.TRANSPARENT);
-        password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setInputType(
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+        );
         password.setTransformationMethod(PasswordTransformationMethod.getInstance());
         password.setPadding(0, 0, dp(8), 0);
-        passRow.addView(password, new LinearLayout.LayoutParams(0, dp(42), 1f));
+
+        passRow.addView(
+                password,
+                new LinearLayout.LayoutParams(0, dp(42), 1f)
+        );
 
         TextView show = text("ANZEIGEN", 10, true, BLUE);
         show.setGravity(Gravity.CENTER);
         show.setPadding(dp(8), 0, dp(8), 0);
         show.setOnClickListener(v -> {
-            int pos = password.getSelectionStart();
+            int position = password.getSelectionStart();
+
             if (password.getTransformationMethod() == null) {
-                password.setTransformationMethod(PasswordTransformationMethod.getInstance());
+                password.setTransformationMethod(
+                        PasswordTransformationMethod.getInstance()
+                );
                 show.setText("ANZEIGEN");
             } else {
                 password.setTransformationMethod(null);
                 show.setText("AUSBLENDEN");
             }
-            password.setSelection(Math.max(0, pos));
+
+            password.setSelection(Math.max(0, position));
         });
-        passRow.addView(show, new LinearLayout.LayoutParams(dp(88), dp(42)));
+
+        passRow.addView(
+                show,
+                new LinearLayout.LayoutParams(dp(88), dp(42))
+        );
 
         passwordWrap.addView(passRow);
         content.addView(passwordWrap, fullTop(10));
@@ -387,7 +432,10 @@ public class MainActivity extends Activity {
         regionBox.addView(text("Region", 11, true, 0xFF5B7190));
 
         region = new Spinner(this);
-        String[] regions = {"AUTO", "DE", "EU", "EU2", "US", "FR", "CA", "AU", "AP", "AE", "JP"};
+        String[] regions = {
+                "AUTO", "DE", "EU", "EU2", "US", "FR",
+                "CA", "AU", "AP", "AE", "JP", "IN", "LA", "RU"
+        };
 
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(
                 this,
@@ -395,8 +443,16 @@ public class MainActivity extends Activity {
                 regions
         ) {
             @Override
-            public View getView(int position, View convertView, android.view.ViewGroup parent) {
-                TextView view = (TextView) super.getView(position, convertView, parent);
+            public View getView(
+                    int position,
+                    View convertView,
+                    android.view.ViewGroup parent
+            ) {
+                TextView view = (TextView) super.getView(
+                        position,
+                        convertView,
+                        parent
+                );
                 view.setTextColor(0xFF142847);
                 view.setTextSize(17);
                 view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -407,11 +463,26 @@ public class MainActivity extends Activity {
 
         region.setAdapter(adapter);
         region.setBackgroundColor(Color.TRANSPARENT);
-        regionBox.addView(region, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(42)
-        ));
+
+        regionBox.addView(
+                region,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(42)
+                )
+        );
+
         content.addView(regionBox, fullTop(10));
+
+        TextView hint = text(
+                "AUTO erkennt die Abbott-Region automatisch. Nutze hier die Zugangsdaten des Follower-Kontos, "
+                        + "nicht zwingend die Zugangsdaten der Person mit dem Sensor.",
+                11,
+                false,
+                0xFF7186A1
+        );
+        hint.setLineSpacing(dp(1), 1.1f);
+        content.addView(hint, fullTop(8));
 
         header.setOnClickListener(v -> {
             if (content.getVisibility() == View.VISIBLE) {
@@ -432,10 +503,11 @@ public class MainActivity extends Activity {
         content.setOrientation(LinearLayout.VERTICAL);
 
         TextView chevron = text("⌃", 22, true, 0xFF5D7596);
+
         LinearLayout header = sectionHeader(
                 android.R.drawable.ic_dialog_alert,
-                "Warnschwellen",
-                "Benachrichtigung außerhalb deiner Grenzwerte.",
+                "Warnungen",
+                "Eigene Grenzwerte für Handy und Watch.",
                 chevron
         );
 
@@ -447,25 +519,43 @@ public class MainActivity extends Activity {
 
         LinearLayout lowBox = smallNumberBox("Niedrig (mg/dL)");
         low = (EditText) lowBox.getChildAt(1);
-        limits.addView(lowBox, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        limits.addView(
+                lowBox,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
 
         View gap = new View(this);
         limits.addView(gap, new LinearLayout.LayoutParams(dp(10), 1));
 
         LinearLayout highBox = smallNumberBox("Hoch (mg/dL)");
         high = (EditText) highBox.getChildAt(1);
-        limits.addView(highBox, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        limits.addView(
+                highBox,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
 
         content.addView(limits);
 
         View divider = new View(this);
         divider.setBackgroundColor(0xFFE8EFF7);
-        LinearLayout.LayoutParams dividerLp = new LinearLayout.LayoutParams(
+
+        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(1)
         );
-        dividerLp.topMargin = dp(14);
-        content.addView(divider, dividerLp);
+        dividerParams.topMargin = dp(14);
+
+        content.addView(divider, dividerParams);
 
         LinearLayout carRow = new LinearLayout(this);
         carRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -473,19 +563,49 @@ public class MainActivity extends Activity {
         carRow.setPadding(0, dp(12), 0, 0);
 
         ImageView carIcon = circleIcon(android.R.drawable.ic_menu_directions);
-        carRow.addView(carIcon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        carRow.addView(
+                carIcon,
+                new LinearLayout.LayoutParams(dp(44), dp(44))
+        );
 
         LinearLayout carText = new LinearLayout(this);
         carText.setOrientation(LinearLayout.VERTICAL);
         carText.setPadding(dp(10), 0, dp(8), 0);
 
-        carText.addView(text("Android Auto – Sprachwarnungen", 14, true, 0xFF142847));
-        carText.addView(text("Warnungen im Car-Modus vorlesen.", 11, false, 0xFF7186A1), wrapTop(2));
-        carRow.addView(carText, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        carText.addView(
+                text(
+                        "Auto-Modus – Sprachwarnungen",
+                        14,
+                        true,
+                        0xFF142847
+                )
+        );
+        carText.addView(
+                text(
+                        "Grenzwertwarnungen im Android-Car-Modus vorlesen.",
+                        11,
+                        false,
+                        0xFF7186A1
+                ),
+                wrapTop(2)
+        );
+
+        carRow.addView(
+                carText,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
 
         carVoice = new Switch(this);
         carVoice.setShowText(false);
-        carRow.addView(carVoice, new LinearLayout.LayoutParams(dp(58), dp(44)));
+
+        carRow.addView(
+                carVoice,
+                new LinearLayout.LayoutParams(dp(58), dp(44))
+        );
 
         content.addView(carRow);
 
@@ -507,7 +627,7 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
 
         startButton = new Button(this);
-        startButton.setText("▶   LibreView-Bericht starten");
+        startButton.setText("▶   Speichern & Live starten");
         startButton.setTextSize(16);
         startButton.setTextColor(Color.WHITE);
         startButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -515,97 +635,41 @@ public class MainActivity extends Activity {
         startButton.setGravity(Gravity.CENTER);
         startButton.setBackground(gradientButton());
         startButton.setOnClickListener(v -> saveAndStart());
-        box.addView(startButton, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(58)
-        ));
 
-        Button refresh = new Button(this);
-        refresh.setText("↻   Jetzt aktualisieren");
-        refresh.setTextSize(15);
-        refresh.setTextColor(BLUE);
-        refresh.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        refresh.setAllCaps(false);
-        refresh.setGravity(Gravity.CENTER);
-        refresh.setBackground(roundedWithStroke(Color.TRANSPARENT, 0xFF84BEF5, 18));
-        refresh.setOnClickListener(v -> {
-            Intent intent = new Intent(this, LibreService.class);
-            intent.setAction(LibreService.ACTION_REFRESH);
-            startServiceCompat(intent);
-            toast("LibreView-Bericht wird aktualisiert");
-        });
-        box.addView(refresh, fullHeightTop(56, 10));
+        box.addView(
+                startButton,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(58)
+                )
+        );
 
-        TextView stop = text("Live-Anzeige stoppen", 12, true, 0xFF7A8DA8);
-        stop.setGravity(Gravity.CENTER);
-        stop.setPadding(0, dp(12), 0, dp(4));
-        stop.setOnClickListener(v -> {
-            SecurePrefs.prefs(this).edit().putBoolean("enabled", false).apply();
-            stopService(new Intent(this, LibreService.class));
-            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancel(1002);
-            renderLastReading();
-            toast("Live-Anzeige gestoppt");
-        });
-        box.addView(stop);
+        refreshButton = new Button(this);
+        refreshButton.setText("↻   Jetzt aktualisieren");
+        refreshButton.setTextSize(15);
+        refreshButton.setTextColor(BLUE);
+        refreshButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        refreshButton.setAllCaps(false);
+        refreshButton.setGravity(Gravity.CENTER);
+        refreshButton.setBackground(
+                roundedWithStroke(Color.TRANSPARENT, 0xFF84BEF5, 18)
+        );
+        refreshButton.setOnClickListener(v -> refreshNow());
+
+        box.addView(refreshButton, fullHeightTop(56, 10));
+
+        Button logout = new Button(this);
+        logout.setText("Abmelden & lokale Daten löschen");
+        logout.setTextSize(13);
+        logout.setTextColor(RED);
+        logout.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        logout.setAllCaps(false);
+        logout.setBackground(Color.TRANSPARENT);
+        logout.setOnClickListener(v -> confirmLogout());
+
+        box.addView(logout, fullHeightTop(48, 8));
 
         return box;
-    }
-
-    private void confirmTermsAcceptance() {
-        String step = SecurePrefs.prefs(this).getString("terms_step", "tou");
-        boolean privacy = "pp".equals(step);
-
-        String title = privacy
-                ? "LibreView-Datenschutzbestätigung"
-                : "LibreView-Nutzungsbedingungen";
-
-        String message = privacy
-                ? "LibreView verlangt eine Datenschutz-/Privacy-Policy-Bestätigung. " +
-                  "Wenn du fortfährst, sendet LibreMirror genau diesen von LibreView angeforderten Schritt. " +
-                  "Fahre nur fort, wenn du diese Bestätigung abgeben möchtest."
-                : "LibreView verlangt die Bestätigung aktualisierter Nutzungsbedingungen. " +
-                  "Wenn du fortfährst, sendet LibreMirror genau diesen von LibreView angeforderten Schritt. " +
-                  "Fahre nur fort, wenn du die Bedingungen akzeptieren möchtest.";
-
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setMessage(message)
-                .setNegativeButton("Abbrechen", null)
-                .setPositiveButton("Bestätigen", (dialog, which) -> {
-                    Intent intent = new Intent(this, LibreService.class);
-                    intent.setAction(LibreService.ACTION_ACCEPT_TERMS);
-                    startServiceCompat(intent);
-                    toast("LibreView-Kontoschritt wird bestätigt");
-                })
-                .show();
-    }
-
-    private void verifyTwoFactor() {
-        String code = twoFactorCode == null ? "" : twoFactorCode.getText().toString().trim();
-
-        if (code.isEmpty()) {
-            toast("Bitte den Bestätigungscode eingeben");
-            return;
-        }
-
-        Intent intent = new Intent(this, LibreService.class);
-        intent.setAction(LibreService.ACTION_VERIFY_2FA);
-        intent.putExtra(LibreService.EXTRA_2FA_CODE, code);
-        startServiceCompat(intent);
-
-        verifyTwoFactorButton.setEnabled(false);
-        verifyTwoFactorButton.setText("Code wird geprüft …");
-        toast("LibreView-Code wird geprüft");
-    }
-
-    private void resendTwoFactor() {
-        if (twoFactorCode != null) twoFactorCode.setText("");
-
-        Intent intent = new Intent(this, LibreService.class);
-        intent.setAction(LibreService.ACTION_RESEND_2FA);
-        startServiceCompat(intent);
-
-        toast("Neuer LibreView-Code wird angefordert");
     }
 
     private void saveAndStart() {
@@ -613,38 +677,93 @@ public class MainActivity extends Activity {
         String pass = password.getText().toString();
 
         if (mail.isEmpty() || pass.isEmpty()) {
-            toast("LibreView-E-Mail und Passwort fehlen");
+            toast("Follower-E-Mail und Passwort fehlen");
+            return;
+        }
+
+        double lowValue = parseDouble(
+                low.getText().toString(),
+                70.0
+        );
+        double highValue = parseDouble(
+                high.getText().toString(),
+                180.0
+        );
+
+        if (lowValue >= highValue) {
+            toast("Der niedrige Grenzwert muss unter dem hohen liegen");
             return;
         }
 
         try {
             SecurePrefs.putSecret(this, "email", mail);
             SecurePrefs.putSecret(this, "password", pass);
+            SecurePrefs.putSecret(this, "session_token", "");
 
             SecurePrefs.prefs(this).edit()
                     .putString("region", String.valueOf(region.getSelectedItem()))
-                    .putString("low", low.getText().toString().trim().isEmpty() ? "70" : low.getText().toString().trim())
-                    .putString("high", high.getText().toString().trim().isEmpty() ? "180" : high.getText().toString().trim())
+                    .putString("low", formatNumber(lowValue))
+                    .putString("high", formatNumber(highValue))
                     .putBoolean("car_voice", carVoice.isChecked())
                     .putBoolean("enabled", true)
-                    .putBoolean("two_factor_required", false)
-                    .putBoolean("terms_required", false)
-                    .remove("terms_step")
-                    .remove("pending_2fa_base_url")
+                    .remove("session_base_url")
+                    .remove("session_expires_ms")
+                    .remove("session_account_hash")
+                    .remove("session_patient_id")
                     .putString("last_error", "")
-                    .remove("source")
-                    .remove("juggluco_last_seen_ms")
-                    .remove("juggluco_last_mgdl")
                     .apply();
 
-            SecurePrefs.putSecret(this, "pending_2fa_token", "");
             stopService(new Intent(this, LibreService.class));
             startServiceCompat(new Intent(this, LibreService.class));
-            startButton.setText("●   LibreView-Bericht läuft");
-            toast("LibreMirror LibreView-Bericht gestartet");
+
+            toast("LibreMirror Live gestartet");
+            renderState();
         } catch (Exception e) {
-            toast("Speichern fehlgeschlagen: " + e.getMessage());
+            toast("Speichern fehlgeschlagen");
         }
+    }
+
+    private void refreshNow() {
+        if (!SecurePrefs.prefs(this).getBoolean("enabled", false)) {
+            toast("Live-Dienst zuerst starten");
+            return;
+        }
+
+        Intent intent = new Intent(this, LibreService.class);
+        intent.setAction(LibreService.ACTION_REFRESH);
+        startServiceCompat(intent);
+        toast("Aktualisierung angefordert");
+    }
+
+    private void confirmLogout() {
+        new AlertDialog.Builder(this)
+                .setTitle("LibreMirror zurücksetzen")
+                .setMessage(
+                        "Zugangsdaten, Session, Verlauf und Einstellungen werden nur auf diesem Gerät gelöscht."
+                )
+                .setNegativeButton("Abbrechen", null)
+                .setPositiveButton("Löschen", (dialog, which) -> logoutAndClear())
+                .show();
+    }
+
+    private void logoutAndClear() {
+        Intent stop = new Intent(this, LibreService.class);
+        stop.setAction(LibreService.ACTION_STOP);
+        startServiceCompat(stop);
+
+        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancelAll();
+
+        SecurePrefs.clearAll(this);
+
+        email.setText("");
+        password.setText("");
+        low.setText("70");
+        high.setText("180");
+        region.setSelection(0);
+        carVoice.setChecked(true);
+
+        toast("Lokale LibreMirror-Daten gelöscht");
+        renderState();
     }
 
     private void loadSettings() {
@@ -654,6 +773,7 @@ public class MainActivity extends Activity {
         password.setText(SecurePrefs.getSecret(this, "password"));
 
         String wanted = prefs.getString("region", "AUTO");
+
         for (int i = 0; i < region.getCount(); i++) {
             if (String.valueOf(region.getItemAtPosition(i)).equals(wanted)) {
                 region.setSelection(i);
@@ -666,49 +786,56 @@ public class MainActivity extends Activity {
         carVoice.setChecked(prefs.getBoolean("car_voice", true));
 
         if (prefs.getBoolean("enabled", false)) {
-            startButton.setText("●   Libre Cloud läuft");
             startServiceCompat(new Intent(this, LibreService.class));
         }
     }
 
-    private void renderLastReading() {
+    private void renderState() {
         SharedPreferences prefs = SecurePrefs.prefs(this);
 
         String value = prefs.getString("last_value", "");
-        String unit = prefs.getString("last_unit", "mg/dL");
         int trend = prefs.getInt("last_trend", 0);
-        long fetch = prefs.getLong("last_fetch_ms", 0);
+        long sensorMs = prefs.getLong("last_sensor_ms", 0L);
+        long syncMs = prefs.getLong("last_success_ms", 0L);
+        String patient = prefs.getString("patient_name", "");
         String error = prefs.getString("last_error", "");
         boolean enabled = prefs.getBoolean("enabled", false);
-        boolean termsRequired = prefs.getBoolean("terms_required", false);
-        boolean twoFactorRequired = prefs.getBoolean("two_factor_required", false);
-        String termsStep = prefs.getString("terms_step", "tou");
+
+        long now = System.currentTimeMillis();
+        boolean stale = sensorMs > 0L && now - sensorMs > 5L * 60L * 1000L;
 
         if (!value.isEmpty()) {
             valueView.setText(value);
-            unitView.setText(unit);
+            unitView.setText("mg/dL");
             trendArrowView.setText(LibreApiClient.arrow(trend));
-            trendLabelView.setText(trendLabel(trend));
+            trendLabelView.setText(LibreApiClient.trendLabel(trend));
 
-            boolean ok = error.isEmpty();
-            connectionChip.setText(ok ? "●  LibreView verbunden" : "●  Letzter LibreView-Wert");
-            connectionChip.setTextColor(ok ? GREEN : 0xFFB57800);
-            connectionChip.setBackground(rounded(ok ? 0xFFE6F8EF : 0xFFFFF3D9, 18));
-
-            if (fetch > 0) {
-                String time = new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date(fetch));
-                updatedView.setText("Letzte Aktualisierung: Heute, " + time);
+            if (error.isEmpty() && !stale) {
+                setConnectionChip("●  Verbunden", GREEN, 0xFFE6F8EF);
+            } else if (stale) {
+                setConnectionChip("●  Wert veraltet", ORANGE, 0xFFFFF3D9);
+            } else {
+                setConnectionChip("●  Letzter Wert", ORANGE, 0xFFFFF3D9);
             }
         } else {
             valueView.setText("—");
             unitView.setText("mg/dL");
             trendArrowView.setText("→");
             trendLabelView.setText("Kein Wert");
-            connectionChip.setText("●  Nicht verbunden");
-            connectionChip.setTextColor(RED);
-            connectionChip.setBackground(rounded(0xFFFFEBEE, 18));
-            updatedView.setText("Letzte Aktualisierung: —");
+            setConnectionChip("●  Nicht verbunden", RED, 0xFFFFEBEE);
         }
+
+        updatedView.setText(
+                syncMs > 0L
+                        ? "Sync: " + time(syncMs)
+                        : "Sync: —"
+        );
+
+        sensorAgeView.setText(
+                sensorMs > 0L
+                        ? "Sensor: vor " + ageText(now - sensorMs)
+                        : "Sensor: —"
+        );
 
         if (error.isEmpty()) {
             errorView.setVisibility(View.GONE);
@@ -718,56 +845,54 @@ public class MainActivity extends Activity {
             errorView.setText(error);
         }
 
-        if (termsRequired && !twoFactorRequired) {
-            termsButton.setText(
-                    "pp".equals(termsStep)
-                            ? "LibreView-Datenschutz bestätigen"
-                            : "LibreView-Bedingungen bestätigen"
-            );
-            termsButton.setVisibility(View.VISIBLE);
-        } else {
-            termsButton.setVisibility(View.GONE);
-        }
+        patientView.setText(
+                patient.isEmpty()
+                        ? "Freigabe: —"
+                        : "Freigabe: " + patient
+        );
 
-        if (twoFactorRequired) {
-            twoFactorBox.setVisibility(View.VISIBLE);
-            verifyTwoFactorButton.setEnabled(true);
-            verifyTwoFactorButton.setText("Code bestätigen");
-            connectionChip.setText("●  2FA erforderlich");
-            connectionChip.setTextColor(0xFFB57800);
-            connectionChip.setBackground(rounded(0xFFFFF3D9, 18));
-        } else {
-            twoFactorBox.setVisibility(View.GONE);
-            if (twoFactorCode != null) twoFactorCode.setText("");
-        }
+        serviceStatusView.setText(
+                enabled
+                        ? "Live-Dienst: aktiv • ca. alle 60 Sekunden"
+                        : "Live-Dienst: aus"
+        );
+        serviceStatusView.setTextColor(enabled ? GREEN : 0xFF526A8A);
 
-        chartView.setValues(readHistory(prefs.getString("history_values", "")));
-        startButton.setText(enabled ? "●   LibreView-Bericht läuft" : "▶   LibreView-Bericht starten");
+        startButton.setText(
+                enabled
+                        ? "●   Einstellungen speichern"
+                        : "▶   Speichern & Live starten"
+        );
+
+        refreshButton.setEnabled(enabled);
+        refreshButton.setAlpha(enabled ? 1f : 0.5f);
+
+        chartView.setValues(
+                readHistory(prefs.getString("history_values", ""))
+        );
+    }
+
+    private void setConnectionChip(String label, int color, int background) {
+        connectionChip.setText(label);
+        connectionChip.setTextColor(color);
+        connectionChip.setBackground(rounded(background, 18));
     }
 
     private List<Float> readHistory(String raw) {
         List<Float> result = new ArrayList<>();
+
         if (raw == null || raw.trim().isEmpty()) return result;
 
-        String[] parts = raw.contains(";") ? raw.split(";") : raw.split(",");
+        String[] parts = raw.split(";");
+
         for (String part : parts) {
             try {
                 result.add(Float.parseFloat(part.replace(',', '.')));
             } catch (Exception ignored) {
             }
         }
-        return result;
-    }
 
-    private String trendLabel(int trend) {
-        switch (trend) {
-            case 1: return "Stark fallend";
-            case 2: return "Fallend";
-            case 3: return "Stabil";
-            case 4: return "Steigend";
-            case 5: return "Stark steigend";
-            default: return "Trend";
-        }
+        return result;
     }
 
     private LinearLayout card(boolean gradient) {
@@ -776,39 +901,66 @@ public class MainActivity extends Activity {
         card.setPadding(dp(18), dp(18), dp(18), dp(18));
         card.setElevation(dp(4));
 
-        GradientDrawable bg;
+        GradientDrawable background;
+
         if (gradient) {
-            bg = new GradientDrawable(
+            background = new GradientDrawable(
                     GradientDrawable.Orientation.TL_BR,
                     new int[]{0xFFFFFFFF, 0xFFF2FCFF}
             );
-            bg.setCornerRadius(dp(24));
-            bg.setStroke(dp(1), 0xFFE3EDF7);
+            background.setCornerRadius(dp(24));
+            background.setStroke(dp(1), 0xFFE3EDF7);
         } else {
-            bg = roundedWithStroke(Color.WHITE, 0xFFE3EDF7, 24);
+            background = roundedWithStroke(
+                    Color.WHITE,
+                    0xFFE3EDF7,
+                    24
+            );
         }
 
-        card.setBackground(bg);
+        card.setBackground(background);
         return card;
     }
 
-    private LinearLayout sectionHeader(int iconRes, String title, String subtitle, TextView chevron) {
+    private LinearLayout sectionHeader(
+            int iconRes,
+            String title,
+            String subtitle,
+            TextView chevron
+    ) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
         ImageView icon = circleIcon(iconRes);
-        row.addView(icon, new LinearLayout.LayoutParams(dp(48), dp(48)));
+        row.addView(
+                icon,
+                new LinearLayout.LayoutParams(dp(48), dp(48))
+        );
 
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
         texts.setPadding(dp(10), 0, dp(8), 0);
         texts.addView(text(title, 18, true, 0xFF0B1D3D));
-        texts.addView(text(subtitle, 11, false, 0xFF7186A1), wrapTop(2));
+        texts.addView(
+                text(subtitle, 11, false, 0xFF7186A1),
+                wrapTop(2)
+        );
 
-        row.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(
+                texts,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
         chevron.setGravity(Gravity.CENTER);
-        row.addView(chevron, new LinearLayout.LayoutParams(dp(34), dp(40)));
+        row.addView(
+                chevron,
+                new LinearLayout.LayoutParams(dp(34), dp(40))
+        );
 
         return row;
     }
@@ -819,6 +971,7 @@ public class MainActivity extends Activity {
         icon.setBackground(rounded(0xFFE4F2FF, 50));
 
         Drawable drawable = getDrawable(res);
+
         if (drawable != null) {
             drawable = drawable.mutate();
             drawable.setTint(BLUE);
@@ -837,7 +990,9 @@ public class MainActivity extends Activity {
         editText.setSingleLine(true);
         editText.setInputType(inputType);
         editText.setPadding(dp(14), 0, dp(14), 0);
-        editText.setBackground(roundedWithStroke(FIELD_BG, BORDER, 16));
+        editText.setBackground(
+                roundedWithStroke(FIELD_BG, BORDER, 16)
+        );
         editText.setMinHeight(dp(58));
         return editText;
     }
@@ -846,12 +1001,17 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(12), dp(9), dp(12), dp(8));
-        box.setBackground(roundedWithStroke(FIELD_BG, BORDER, 16));
+        box.setBackground(
+                roundedWithStroke(FIELD_BG, BORDER, 16)
+        );
 
         box.addView(text(label, 11, true, 0xFF5B7190));
 
         EditText value = new EditText(this);
-        value.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        value.setInputType(
+                InputType.TYPE_CLASS_NUMBER
+                        | InputType.TYPE_NUMBER_FLAG_DECIMAL
+        );
         value.setTextSize(22);
         value.setTextColor(0xFF142847);
         value.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -859,17 +1019,26 @@ public class MainActivity extends Activity {
         value.setBackgroundColor(Color.TRANSPARENT);
         value.setPadding(0, 0, 0, 0);
         value.setMinHeight(dp(40));
-        box.addView(value);
 
+        box.addView(value);
         return box;
     }
 
-    private TextView text(String value, int sp, boolean bold, int color) {
+    private TextView text(
+            String value,
+            int sp,
+            boolean bold,
+            int color
+    ) {
         TextView textView = new TextView(this);
         textView.setText(value);
         textView.setTextSize(sp);
         textView.setTextColor(color);
-        if (bold) textView.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+
+        if (bold) {
+            textView.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        }
+
         return textView;
     }
 
@@ -880,7 +1049,11 @@ public class MainActivity extends Activity {
         return drawable;
     }
 
-    private GradientDrawable roundedWithStroke(int color, int strokeColor, int radiusDp) {
+    private GradientDrawable roundedWithStroke(
+            int color,
+            int strokeColor,
+            int radiusDp
+    ) {
         GradientDrawable drawable = rounded(color, radiusDp);
         drawable.setStroke(dp(1), strokeColor);
         return drawable;
@@ -913,7 +1086,10 @@ public class MainActivity extends Activity {
         return params;
     }
 
-    private LinearLayout.LayoutParams fullHeightTop(int heightDp, int topDp) {
+    private LinearLayout.LayoutParams fullHeightTop(
+            int heightDp,
+            int topDp
+    ) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(heightDp)
@@ -923,23 +1099,63 @@ public class MainActivity extends Activity {
     }
 
     private int dp(float value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        return Math.round(
+                value * getResources().getDisplayMetrics().density
+        );
     }
 
     private void startServiceCompat(Intent intent) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent);
-            else startService(intent);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
         } catch (Exception e) {
-            toast("Dienst konnte nicht gestartet werden: " + e.getMessage());
+            toast("Live-Dienst konnte nicht gestartet werden");
         }
     }
 
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 10);
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                    10
+            );
         }
+    }
+
+    private static double parseDouble(String value, double fallback) {
+        try {
+            return Double.parseDouble(
+                    value == null ? "" : value.replace(',', '.')
+            );
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static String formatNumber(double value) {
+        if (Math.rint(value) == value) {
+            return String.format(Locale.US, "%.0f", value);
+        }
+        return String.format(Locale.US, "%.1f", value);
+    }
+
+    private static String time(long timestamp) {
+        return new SimpleDateFormat(
+                "HH:mm:ss",
+                Locale.getDefault()
+        ).format(new Date(timestamp));
+    }
+
+    private static String ageText(long ageMs) {
+        long minutes = Math.max(0L, ageMs / 60_000L);
+        if (minutes <= 0L) return "< 1 Min.";
+        if (minutes == 1L) return "1 Min.";
+        return minutes + " Min.";
     }
 
     private void toast(String value) {
