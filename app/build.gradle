@@ -1,0 +1,29 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'de.assimoe.libremirror'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'de.assimoe.libremirror'
+        minSdk 26
+        targetSdk 33
+        versionCode 1
+        versionName '0.1.0-test'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
