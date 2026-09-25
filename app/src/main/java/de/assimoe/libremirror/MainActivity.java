@@ -311,7 +311,7 @@ public class MainActivity extends Activity {
         LinearLayout card = card(false);
 
         card.addView(sectionHeader(
-                android.R.drawable.stat_sys_data_bluetooth,
+                android.R.drawable.ic_menu_info_details,
                 "Libre 3 Direktmodus",
                 "Juggluco empfängt den Sensor per Bluetooth.",
                 text("", 1, false, Color.TRANSPARENT)
