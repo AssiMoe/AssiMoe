@@ -1,5 +1,6 @@
 package de.assimoe.libremirror;
 
+import android.app.KeyguardManager;
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
 import android.content.Context;
@@ -31,6 +32,11 @@ final class WidgetRenderer {
 
         String value = prefs.getString("last_value", "");
         int trend = prefs.getInt("last_trend", 0);
+
+        boolean privateMode = prefs.getBoolean("private_mode", false);
+        KeyguardManager keyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+        boolean locked = keyguard != null && keyguard.isDeviceLocked();
+        boolean hideValue = privateMode && locked;
         long sensorMs = prefs.getLong("last_sensor_ms", 0L);
         String error = prefs.getString("last_error", "");
         double low = parseDouble(prefs.getString("low", "70"), 70.0);
@@ -51,38 +57,40 @@ final class WidgetRenderer {
         String status = error.isEmpty() ? age : "Letzter Wert • Verbindung prüfen";
 
         if (style == STYLE_MINI) {
-            views.setTextViewText(R.id.widget_value, display);
-            views.setTextViewText(R.id.widget_arrow, value.isEmpty() ? "" : arrow);
-            views.setTextViewText(R.id.widget_unit, value.isEmpty() ? "" : "mg/dL");
+            views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
+            views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
+            views.setTextViewText(R.id.widget_unit, hideValue || value.isEmpty() ? "" : "mg/dL");
             views.setTextViewText(R.id.widget_status, status);
         } else if (style == STYLE_CLEAN) {
             views.setTextViewText(R.id.widget_title, "LibreMirror");
-            views.setTextViewText(R.id.widget_value, display);
-            views.setTextViewText(R.id.widget_arrow, value.isEmpty() ? "" : arrow);
-            views.setTextViewText(R.id.widget_unit, value.isEmpty() ? "" : "mg/dL");
+            views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
+            views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
+            views.setTextViewText(R.id.widget_unit, hideValue || value.isEmpty() ? "" : "mg/dL");
             views.setTextViewText(R.id.widget_status, status);
         } else if (style == STYLE_COMPACT) {
             views.setTextViewText(R.id.widget_title, "LibreMirror");
-            views.setTextViewText(R.id.widget_value, display);
-            views.setTextViewText(R.id.widget_arrow, value.isEmpty() ? "" : arrow);
-            views.setTextViewText(R.id.widget_unit, value.isEmpty() ? "" : "mg/dL");
+            views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
+            views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
+            views.setTextViewText(R.id.widget_unit, hideValue || value.isEmpty() ? "" : "mg/dL");
             views.setTextViewText(R.id.widget_status, status);
             views.setTextViewText(
                     R.id.widget_trend,
-                    value.isEmpty() ? "Kein Wert" : LibreApiClient.trendLabel(trend)
+                    hideValue ? "Privat" : value.isEmpty() ? "Kein Wert" : LibreApiClient.trendLabel(trend)
             );
         } else if (style == STYLE_LARGE) {
             views.setTextViewText(R.id.widget_title, "LibreMirror");
-            views.setTextViewText(R.id.widget_value, display);
-            views.setTextViewText(R.id.widget_arrow, value.isEmpty() ? "" : arrow);
-            views.setTextViewText(R.id.widget_unit, value.isEmpty() ? "" : "mg/dL");
+            views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
+            views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
+            views.setTextViewText(R.id.widget_unit, hideValue || value.isEmpty() ? "" : "mg/dL");
             views.setTextViewText(R.id.widget_status, status);
 
-            List<Float> history = readHistory(prefs.getString("history_values", ""));
+            List<Float> history = hideValue
+                    ? new ArrayList<>()
+                    : readHistory(prefs.getString("history_values", ""));
             Bitmap chart = renderChart(history, dark);
             views.setImageViewBitmap(R.id.widget_chart, chart);
         } else {
-            double numeric = parseDouble(value, Double.NaN);
+            double numeric = hideValue ? Double.NaN : parseDouble(value, Double.NaN);
             int background;
             String label;
 
@@ -102,9 +110,9 @@ final class WidgetRenderer {
 
             views.setInt(R.id.widget_root, "setBackgroundResource", background);
             views.setTextViewText(R.id.widget_alert_label, label);
-            views.setTextViewText(R.id.widget_value, display);
-            views.setTextViewText(R.id.widget_arrow, value.isEmpty() ? "" : arrow);
-            views.setTextViewText(R.id.widget_unit, value.isEmpty() ? "" : "mg/dL");
+            views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
+            views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
+            views.setTextViewText(R.id.widget_unit, hideValue || value.isEmpty() ? "" : "mg/dL");
             views.setTextViewText(R.id.widget_status, status);
         }
 
