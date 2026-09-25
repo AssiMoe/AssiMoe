@@ -11,6 +11,10 @@
         android:label="LibreMirror"
         android:theme="@style/AppTheme">
 
+        <meta-data
+            android:name="com.google.android.wearable.standalone"
+            android:value="false" />
+
         <activity
             android:name=".WearMainActivity"
             android:exported="true">
