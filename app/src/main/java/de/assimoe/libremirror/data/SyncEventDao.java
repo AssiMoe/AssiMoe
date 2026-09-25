@@ -17,4 +17,7 @@ public interface SyncEventDao {
 
     @Query("DELETE FROM sync_events WHERE timestampMs < :beforeMs")
     void deleteOlderThan(long beforeMs);
+
+    @Query("DELETE FROM sync_events")
+    void deleteAll();
 }
