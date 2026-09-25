@@ -13,7 +13,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -440,15 +439,10 @@ public final class LibreApiClient {
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setRequestProperty("Cache-Control", "no-cache");
         connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-        connection.setRequestProperty("product", "llu.android");
-        connection.setRequestProperty("version", "4.17.0");
         connection.setRequestProperty("Pragma", "no-cache");
 
         if (authenticated) {
             connection.setRequestProperty("Authorization", "Bearer " + authToken);
-            if (userId != null && !userId.isEmpty()) {
-                connection.setRequestProperty("Account-Id", sha256(userId));
-            }
         }
 
         if (body != null) {
@@ -568,16 +562,6 @@ public final class LibreApiClient {
         String r = region == null ? "AUTO" : region.trim().toUpperCase(Locale.ROOT);
         if ("AUTO".equals(r)) return "https://api.libreview.io";
         return "https://api-" + r.toLowerCase(Locale.ROOT) + ".libreview.io";
-    }
-
-    private static String sha256(String value) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-        StringBuilder hex = new StringBuilder();
-        for (byte b : bytes) {
-            hex.append(String.format(Locale.US, "%02x", b));
-        }
-        return hex.toString();
     }
 
     private static String compact(String value) {
