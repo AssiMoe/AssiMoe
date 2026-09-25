@@ -608,8 +608,11 @@ public class MainActivity extends Activity {
 
         root.addView(buildAccountSettings(), fullTop(14));
         root.addView(buildAlertSettings(), fullTop(14));
+        root.addView(buildAutomationSettings(), fullTop(14));
         root.addView(buildAppearanceSettings(), fullTop(14));
         root.addView(buildWidgetSettings(), fullTop(14));
+        root.addView(buildBackupSettings(), fullTop(14));
+        root.addView(buildUpdateSettings(), fullTop(14));
         root.addView(buildServiceSettings(), fullTop(14));
 
         TextView footer = text(
