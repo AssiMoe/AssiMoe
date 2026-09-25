@@ -12,6 +12,8 @@ import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Shader;
+import android.util.TypedValue;
+import android.view.View;
 import android.widget.RemoteViews;
 
 import java.util.ArrayList;
@@ -56,18 +58,39 @@ final class WidgetRenderer {
 
         String status = error.isEmpty() ? age : "Letzter Wert • Verbindung prüfen";
 
+        int sizeMode = prefs.getInt("widget_size_" + appWidgetId, 1);
+        int opacityMode = prefs.getInt("widget_opacity_" + appWidgetId, 1);
+        boolean showTitle = prefs.getBoolean("widget_title_" + appWidgetId, true);
+        boolean showStatus = prefs.getBoolean("widget_status_" + appWidgetId, true);
+
+        float scale = sizeMode == 0 ? 0.86f : sizeMode == 2 ? 1.16f : 1.0f;
+        float alpha = opacityMode == 0 ? 0.60f : opacityMode == 2 ? 1.0f : 0.82f;
+
+        views.setFloat(R.id.widget_root, "setAlpha", alpha);
+
         if (style == STYLE_MINI) {
+            views.setTextViewTextSize(R.id.widget_value, TypedValue.COMPLEX_UNIT_SP, 27f * scale);
+            views.setTextViewTextSize(R.id.widget_arrow, TypedValue.COMPLEX_UNIT_SP, 25f * scale);
+            views.setViewVisibility(R.id.widget_status, showStatus ? View.VISIBLE : View.GONE);
             views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
             views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
             views.setTextViewText(R.id.widget_unit, hideValue || value.isEmpty() ? "" : "mg/dL");
             views.setTextViewText(R.id.widget_status, status);
         } else if (style == STYLE_CLEAN) {
+            views.setTextViewTextSize(R.id.widget_value, TypedValue.COMPLEX_UNIT_SP, 33f * scale);
+            views.setTextViewTextSize(R.id.widget_arrow, TypedValue.COMPLEX_UNIT_SP, 30f * scale);
+            views.setViewVisibility(R.id.widget_title, showTitle ? View.VISIBLE : View.GONE);
+            views.setViewVisibility(R.id.widget_status, showStatus ? View.VISIBLE : View.GONE);
             views.setTextViewText(R.id.widget_title, "LibreMirror");
             views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
             views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
             views.setTextViewText(R.id.widget_unit, hideValue || value.isEmpty() ? "" : "mg/dL");
             views.setTextViewText(R.id.widget_status, status);
         } else if (style == STYLE_COMPACT) {
+            views.setTextViewTextSize(R.id.widget_value, TypedValue.COMPLEX_UNIT_SP, 32f * scale);
+            views.setTextViewTextSize(R.id.widget_arrow, TypedValue.COMPLEX_UNIT_SP, 28f * scale);
+            views.setViewVisibility(R.id.widget_title, showTitle ? View.VISIBLE : View.GONE);
+            views.setViewVisibility(R.id.widget_status, showStatus ? View.VISIBLE : View.GONE);
             views.setTextViewText(R.id.widget_title, "LibreMirror");
             views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
             views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
@@ -78,6 +101,10 @@ final class WidgetRenderer {
                     hideValue ? "Privat" : value.isEmpty() ? "Kein Wert" : LibreApiClient.trendLabel(trend)
             );
         } else if (style == STYLE_LARGE) {
+            views.setTextViewTextSize(R.id.widget_value, TypedValue.COMPLEX_UNIT_SP, 35f * scale);
+            views.setTextViewTextSize(R.id.widget_arrow, TypedValue.COMPLEX_UNIT_SP, 31f * scale);
+            views.setViewVisibility(R.id.widget_title, showTitle ? View.VISIBLE : View.GONE);
+            views.setViewVisibility(R.id.widget_status, showStatus ? View.VISIBLE : View.GONE);
             views.setTextViewText(R.id.widget_title, "LibreMirror");
             views.setTextViewText(R.id.widget_value, hideValue ? "•••" : display);
             views.setTextViewText(R.id.widget_arrow, hideValue || value.isEmpty() ? "" : arrow);
@@ -90,6 +117,9 @@ final class WidgetRenderer {
             Bitmap chart = renderChart(history, dark);
             views.setImageViewBitmap(R.id.widget_chart, chart);
         } else {
+            views.setTextViewTextSize(R.id.widget_value, TypedValue.COMPLEX_UNIT_SP, 34f * scale);
+            views.setTextViewTextSize(R.id.widget_arrow, TypedValue.COMPLEX_UNIT_SP, 30f * scale);
+            views.setViewVisibility(R.id.widget_status, showStatus ? View.VISIBLE : View.GONE);
             double numeric = hideValue ? Double.NaN : parseDouble(value, Double.NaN);
             int background;
             String label;
