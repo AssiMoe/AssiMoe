@@ -10,8 +10,8 @@ android {
         applicationId 'de.assimoe.libremirror'
         minSdk 26
         targetSdk 33
-        versionCode 11
-        versionName '0.4.0-libreview-2fa'
+        versionCode 12
+        versionName '0.4.1-primary-2fa'
     }
 
     buildTypes {
