@@ -70,13 +70,6 @@ public final class LibreApiClient {
             throw new Exception(apiMessage(response, "LibreView-Login fehlgeschlagen."));
         }
 
-        if (data.has("step") && !data.isNull("step")) {
-            throw new Exception(
-                    "LibreView verlangt einen zusätzlichen Anmeldeschritt (z. B. 2FA oder Bestätigung). "
-                            + "Bitte einmal im Browser bei LibreView anmelden und offene Bestätigungen abschließen."
-            );
-        }
-
         JSONObject ticket = data.optJSONObject("authTicket");
         JSONObject user = data.optJSONObject("user");
 
@@ -85,6 +78,21 @@ public final class LibreApiClient {
         }
 
         applyAuthTicket(ticket);
+
+        if (response.optInt("status", 0) == 4) {
+            if (user != null && !user.optString("id", "").isEmpty()) {
+                userId = user.optString("id", "");
+            }
+            throw new TermsRequiredException("LibreView-Nutzungsbedingungen müssen bestätigt werden.");
+        }
+
+        if (data.has("step") && !data.isNull("step")) {
+            throw new Exception(
+                    "LibreView verlangt einen weiteren Anmeldeschritt. "
+                            + "Falls nach Bestätigung der Nutzungsbedingungen weiterhin diese Meldung erscheint, "
+                            + "ist wahrscheinlich 2FA/Trusted Device erforderlich."
+            );
+        }
 
         if (user == null || user.optString("id", "").isEmpty()) {
             JSONObject userResponse = requestJson("GET", baseUrl + "/user", null, true);
@@ -100,6 +108,50 @@ public final class LibreApiClient {
         }
 
         userId = user.optString("id", "");
+    }
+
+    public Reading acceptTermsAndFetch(String email, String password) throws Exception {
+        authToken = null;
+        userId = null;
+        tokenExpiresAt = 0L;
+
+        try {
+            login(email, password);
+            return fetchFromDailyLogReport();
+        } catch (TermsRequiredException expected) {
+            if (authToken == null || authToken.isEmpty()) {
+                throw new Exception("LibreView hat kein Token für die Bestätigung geliefert.");
+            }
+
+            JSONObject response = requestJson("POST", baseUrl + "/auth/continue/tou", null, true);
+            JSONObject data = response.optJSONObject("data");
+            if (data == null) {
+                throw new Exception(apiMessage(response, "LibreView konnte die Nutzungsbedingungen nicht bestätigen."));
+            }
+
+            applyAuthTicket(data.optJSONObject("authTicket"));
+
+            JSONObject user = data.optJSONObject("user");
+            if (user != null && !user.optString("id", "").isEmpty()) {
+                userId = user.optString("id", "");
+            }
+
+            if (userId == null || userId.isEmpty()) {
+                JSONObject userResponse = requestJson("GET", baseUrl + "/user", null, true);
+                JSONObject userData = userResponse.optJSONObject("data");
+                if (userData != null) {
+                    applyAuthTicket(userData.optJSONObject("authTicket"));
+                    JSONObject loadedUser = userData.optJSONObject("user");
+                    if (loadedUser != null) userId = loadedUser.optString("id", "");
+                }
+            }
+
+            if (userId == null || userId.isEmpty()) {
+                throw new Exception("LibreView-Bedingungen bestätigt, aber Benutzer-ID fehlt.");
+            }
+
+            return fetchFromDailyLogReport();
+        }
     }
 
     private Reading fetchFromDailyLogReport() throws Exception {
@@ -512,6 +564,12 @@ public final class LibreApiClient {
         String primaryId;
         int primaryType;
         final List<String> secondaryIds = new ArrayList<>();
+    }
+
+    public static final class TermsRequiredException extends Exception {
+        TermsRequiredException(String message) {
+            super(message);
+        }
     }
 
     private static final class AuthException extends Exception {
