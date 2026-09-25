@@ -646,7 +646,8 @@ public class MainActivity extends Activity {
         List<Float> result = new ArrayList<>();
         if (raw == null || raw.trim().isEmpty()) return result;
 
-        for (String part : raw.split(",")) {
+        String[] parts = raw.contains(";") ? raw.split(";") : raw.split(",");
+        for (String part : parts) {
             try {
                 result.add(Float.parseFloat(part.replace(',', '.')));
             } catch (Exception ignored) {
