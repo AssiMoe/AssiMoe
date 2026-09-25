@@ -46,6 +46,18 @@ public final class SecurePrefs {
         }
     }
 
+    public static void clearAll(Context context) {
+        prefs(context).edit().clear().apply();
+        try {
+            KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
+            ks.load(null);
+            if (ks.containsAlias(KEY_ALIAS)) {
+                ks.deleteEntry(KEY_ALIAS);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private static SecretKey getOrCreateKey() throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
         ks.load(null);
