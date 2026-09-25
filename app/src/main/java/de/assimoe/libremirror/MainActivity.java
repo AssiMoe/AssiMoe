@@ -218,10 +218,12 @@ public class MainActivity extends Activity {
         pageContainer = new FrameLayout(this);
         nowPage = buildNowPage();
         historyPage = buildHistoryPage();
+        statsPage = buildStatisticsPage();
         settingsPage = buildSettingsPage();
 
         pageContainer.addView(nowPage);
         pageContainer.addView(historyPage);
+        pageContainer.addView(statsPage);
         pageContainer.addView(settingsPage);
 
         root.addView(
