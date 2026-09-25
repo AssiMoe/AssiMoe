@@ -14,456 +14,420 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+
 import java.util.Locale;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class LibreService extends Service {
     public static final String ACTION_REFRESH = "de.assimoe.libremirror.REFRESH";
-    public static final String ACTION_ACCEPT_TERMS = "de.assimoe.libremirror.ACCEPT_TERMS";
-    public static final String ACTION_VERIFY_2FA = "de.assimoe.libremirror.VERIFY_2FA";
-    public static final String ACTION_RESEND_2FA = "de.assimoe.libremirror.RESEND_2FA";
-    public static final String EXTRA_2FA_CODE = "two_factor_code";
-    private static final String CH_SERVICE = "libremirror_service";
-    private static final String CH_GLUCOSE = "libremirror_glucose";
-    private static final String CH_ALERTS = "libremirror_alerts";
-    private static final int ID_SERVICE = 1001;
-    private static final int ID_GLUCOSE = 1002;
-    private static final int ID_ALERT = 1003;
+    public static final String ACTION_STOP = "de.assimoe.libremirror.STOP";
+
+    private static final String CHANNEL_LIVE = "libremirror_live";
+    private static final String CHANNEL_ALERTS = "libremirror_alerts";
+    private static final int NOTIFICATION_LIVE = 1001;
+    private static final int NOTIFICATION_ALERT = 1002;
+
+    private static final long NORMAL_INTERVAL_MS = 60_000L;
+    private static final long MAX_BACKOFF_MS = 15L * 60L * 1000L;
+    private static final long ALERT_REPEAT_MS = 30L * 60L * 1000L;
 
     private ScheduledExecutorService scheduler;
+    private final AtomicBoolean polling = new AtomicBoolean(false);
     private LibreApiClient client;
+    private int consecutiveFailures = 0;
     private TextToSpeech tts;
-    private volatile boolean ttsReady;
-    private volatile String lastAlertState = "";
 
     @Override
     public void onCreate() {
         super.onCreate();
-        createChannels();
-        startForeground(ID_SERVICE, serviceNotification("LibreMirror läuft", "Warte auf ersten Wert …"));
-        tts = new TextToSpeech(this, status -> ttsReady = status == TextToSpeech.SUCCESS);
-        scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleWithFixedDelay(this::pollSafely, 0, 5, TimeUnit.MINUTES);
+
+        createNotificationChannels();
+        startForeground(
+                NOTIFICATION_LIVE,
+                buildLiveNotification("LibreMirror", "Live-Dienst wird gestartet …", false)
+        );
+
+        scheduler = new ScheduledThreadPoolExecutor(1);
+        scheduler.execute(this::pollSafely);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && scheduler != null) {
-            if (ACTION_REFRESH.equals(intent.getAction())) {
-                scheduler.execute(this::pollSafely);
-            } else if (ACTION_ACCEPT_TERMS.equals(intent.getAction())) {
-                scheduler.execute(this::acceptTermsSafely);
-            } else if (ACTION_VERIFY_2FA.equals(intent.getAction())) {
-                final String code = intent.getStringExtra(EXTRA_2FA_CODE);
-                scheduler.execute(() -> verifyTwoFactorSafely(code));
-            } else if (ACTION_RESEND_2FA.equals(intent.getAction())) {
-                scheduler.execute(this::resendTwoFactorSafely);
-            }
+        SharedPreferences prefs = SecurePrefs.prefs(this);
+
+        if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            prefs.edit().putBoolean("enabled", false).apply();
+            stopForeground(true);
+            stopSelf();
+            return START_NOT_STICKY;
         }
+
+        if (!prefs.getBoolean("enabled", false)) {
+            stopForeground(true);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && scheduler != null) {
+            scheduler.execute(this::pollSafely);
+        }
+
         return START_STICKY;
     }
 
     private void pollSafely() {
-        PowerManager.WakeLock wl = null;
-        try {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LibreMirror:poll");
-            wl.acquire(90000);
+        if (!polling.compareAndSet(false, true)) return;
 
-            SharedPreferences p = SecurePrefs.prefs(this);
+        PowerManager.WakeLock wakeLock = null;
+        long nextDelay = NORMAL_INTERVAL_MS;
 
-            if (p.getBoolean("two_factor_required", false)) {
-                updateService("Warte auf LibreView-2FA-Code");
-                return;
-            }
-
-            String email = SecurePrefs.getSecret(this, "email");
-            String password = SecurePrefs.getSecret(this, "password");
-            if (email.isEmpty() || password.isEmpty()) {
-                saveError("Bitte LibreView-Zugangsdaten speichern.");
-                updateService("Login fehlt");
-                return;
-            }
-
-            if (client == null) client = new LibreApiClient(p.getString("region", "AUTO"));
-            String previousSensorTime = p.getString("last_sensor_time", "");
-            LibreApiClient.Reading reading = client.fetch(email, password);
-
-            p.edit()
-                    .putString("last_value", reading.displayValue())
-                    .putString("last_unit", reading.unit)
-                    .putInt("last_trend", reading.trend)
-                    .putString("last_sensor_time", reading.timestamp)
-                    .putLong("last_fetch_ms", System.currentTimeMillis())
-                    .putString("last_error", "")
-                    .putBoolean("terms_required", false)
-                    .putBoolean("two_factor_required", false)
-                    .remove("terms_step")
-                    .remove("pending_2fa_base_url")
-                    .remove("pending_2fa_mode")
-                    .apply();
-
-            if (!reading.timestamp.equals(previousSensorTime)) {
-                appendHistory(p, reading);
-            }
-            showGlucoseNotification(reading);
-            checkAlert(reading, p);
-            updateService("LibreView-Bericht aktualisiert " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date()));
-        } catch (LibreApiClient.TermsRequiredException e) {
-            SecurePrefs.prefs(this).edit()
-                    .putBoolean("terms_required", true)
-                    .putString("terms_step", e.getStepType())
-                    .putBoolean("two_factor_required", false)
-                    .putString("last_error", e.getMessage())
-                    .putLong("last_error_ms", System.currentTimeMillis())
-                    .apply();
-            updateService("LibreView-Kontobestätigung erforderlich");
-        } catch (LibreApiClient.TwoFactorRequiredException e) {
-            beginTwoFactorSafely(e.getMessage());
-        } catch (Exception e) {
-            saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            updateService("Fehler beim Abruf");
-        } finally {
-            if (wl != null && wl.isHeld()) wl.release();
-        }
-    }
-
-    private void acceptTermsSafely() {
-        PowerManager.WakeLock wl = null;
-        try {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LibreMirror:terms");
-            wl.acquire(90000);
-
-            SharedPreferences p = SecurePrefs.prefs(this);
-            String email = SecurePrefs.getSecret(this, "email");
-            String password = SecurePrefs.getSecret(this, "password");
-
-            if (email.isEmpty() || password.isEmpty()) {
-                saveError("Bitte LibreView-Zugangsdaten speichern.");
-                return;
-            }
-
-            if (client == null) client = new LibreApiClient(p.getString("region", "AUTO"));
-            LibreApiClient.Reading reading = client.acceptTermsAndFetch(email, password);
-
-            p.edit()
-                    .putBoolean("terms_required", false)
-                    .remove("terms_step")
-                    .putString("last_value", reading.displayValue())
-                    .putString("last_unit", reading.unit)
-                    .putInt("last_trend", reading.trend)
-                    .putString("last_sensor_time", reading.timestamp)
-                    .putLong("last_fetch_ms", System.currentTimeMillis())
-                    .putString("last_error", "")
-                    .apply();
-
-            appendHistory(p, reading);
-            showGlucoseNotification(reading);
-            checkAlert(reading, p);
-            updateService("LibreView-Bedingungen bestätigt");
-        } catch (LibreApiClient.TermsRequiredException e) {
-            SecurePrefs.prefs(this).edit()
-                    .putBoolean("terms_required", true)
-                    .putString("terms_step", e.getStepType())
-                    .putBoolean("two_factor_required", false)
-                    .putString("last_error", e.getMessage())
-                    .putLong("last_error_ms", System.currentTimeMillis())
-                    .apply();
-            updateService("Weiterer LibreView-Kontoschritt erforderlich");
-        } catch (LibreApiClient.TwoFactorRequiredException e) {
-            beginTwoFactorSafely(e.getMessage());
-        } catch (Exception e) {
-            saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            updateService("Bestätigung fehlgeschlagen");
-        } finally {
-            if (wl != null && wl.isHeld()) wl.release();
-        }
-    }
-
-
-    private void beginTwoFactorSafely(String reason) {
         try {
             SharedPreferences prefs = SecurePrefs.prefs(this);
 
-            if (client == null) {
-                throw new Exception("LibreView-2FA konnte nicht gestartet werden, weil die Login-Sitzung fehlt.");
+            if (!prefs.getBoolean("enabled", false)) {
+                stopSelf();
+                return;
             }
 
-            String twoFactorMode = client.sendTwoFactorCode();
-
-            SecurePrefs.putSecret(this, "pending_2fa_token", client.getAuthToken());
-            prefs.edit()
-                    .putString("pending_2fa_base_url", client.getBaseUrl())
-                    .putString("pending_2fa_mode", twoFactorMode)
-                    .putBoolean("two_factor_required", true)
-                    .putBoolean("terms_required", false)
-                    .remove("terms_step")
-                    .putString("last_error",
-                            "LibreView hat einen Bestätigungscode per E-Mail gesendet. Bitte Code unten eingeben.")
-                    .putLong("last_error_ms", System.currentTimeMillis())
-                    .apply();
-
-            updateService("LibreView-2FA-Code wurde angefordert");
-        } catch (Exception e) {
-            saveError(
-                    "2FA-Code konnte nicht angefordert werden: "
-                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())
+            PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+            wakeLock = powerManager.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "LibreMirror:sync"
             );
-            updateService("2FA-Code konnte nicht angefordert werden");
-        }
-    }
+            wakeLock.acquire(30_000L);
 
-    private void verifyTwoFactorSafely(String code) {
-        PowerManager.WakeLock wl = null;
-        try {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LibreMirror:2fa");
-            wl.acquire(90000);
+            String email = SecurePrefs.getSecret(this, "email");
+            String password = SecurePrefs.getSecret(this, "password");
 
-            SharedPreferences prefs = SecurePrefs.prefs(this);
-
-            if (code == null || code.trim().isEmpty()) {
-                saveError("Bitte den LibreView-Bestätigungscode eingeben.");
-                return;
-            }
-
-            if (client == null) {
-                client = new LibreApiClient(prefs.getString("region", "AUTO"));
-            }
-
-            String pendingToken = SecurePrefs.getSecret(this, "pending_2fa_token");
-            String pendingBaseUrl = prefs.getString("pending_2fa_base_url", "");
-            String pendingMode = prefs.getString("pending_2fa_mode", "BOOL_TRUE");
-
-            if (pendingToken.isEmpty()) {
-                throw new Exception(
-                        "Die 2FA-Sitzung ist nicht mehr vorhanden. Bitte über 'Code erneut senden' einen neuen Code anfordern."
+            if (email.isEmpty() || password.isEmpty()) {
+                throw new LibreApiClient.UserVisibleException(
+                        "Bitte den LibreLinkUp-Follower-Account einrichten."
                 );
             }
 
-            client.restoreTwoFactorSession(pendingToken, pendingBaseUrl, pendingMode);
-            LibreApiClient.Reading reading = client.verifyTwoFactorAndFetch(code.trim());
+            ensureClient(prefs);
 
-            String previousSensorTime = prefs.getString("last_sensor_time", "");
+            LibreApiClient.FetchResult result = client.fetch(email, password);
+            saveSession(client.sessionState());
+            saveReading(result);
 
+            consecutiveFailures = 0;
             prefs.edit()
-                    .putBoolean("two_factor_required", false)
-                    .putBoolean("terms_required", false)
-                    .remove("terms_step")
-                    .remove("pending_2fa_base_url")
-                    .remove("pending_2fa_mode")
-                    .putString("last_value", reading.displayValue())
-                    .putString("last_unit", reading.unit)
-                    .putInt("last_trend", reading.trend)
-                    .putString("last_sensor_time", reading.timestamp)
-                    .putLong("last_fetch_ms", System.currentTimeMillis())
                     .putString("last_error", "")
+                    .putLong("last_success_ms", System.currentTimeMillis())
                     .apply();
 
-            SecurePrefs.putSecret(this, "pending_2fa_token", "");
-
-            if (!reading.timestamp.equals(previousSensorTime)) {
-                appendHistory(prefs, reading);
-            }
-
-            showGlucoseNotification(reading);
-            checkAlert(reading, prefs);
-            updateService("LibreView-2FA bestätigt");
-        } catch (LibreApiClient.TermsRequiredException e) {
-            SecurePrefs.prefs(this).edit()
-                    .putBoolean("two_factor_required", false)
-                    .putBoolean("terms_required", true)
-                    .putString("terms_step", e.getStepType())
-                    .putString("last_error", e.getMessage())
-                    .apply();
-            updateService("Weiterer LibreView-Kontoschritt erforderlich");
+            updateLiveNotification(result.current, false, "");
+            checkThresholdAlert(result.current, prefs);
+        } catch (LibreApiClient.RateLimitException e) {
+            consecutiveFailures++;
+            nextDelay = Math.max(e.retryAfterMs, calculateBackoff());
+            saveError(e.getMessage());
+            updateNotificationFromCache("Rate-Limit – automatischer neuer Versuch");
+        } catch (LibreApiClient.UserVisibleException e) {
+            consecutiveFailures++;
+            nextDelay = calculateBackoff();
+            saveError(e.getMessage());
+            updateNotificationFromCache("Einrichtung prüfen");
         } catch (Exception e) {
-            saveError(
-                    "2FA-Bestätigung fehlgeschlagen: "
-                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())
-            );
-            updateService("2FA-Bestätigung fehlgeschlagen");
+            consecutiveFailures++;
+            nextDelay = calculateBackoff();
+            saveError("Verbindungsfehler. LibreMirror versucht es automatisch erneut.");
+            updateNotificationFromCache("Verbindungsfehler – neuer Versuch automatisch");
         } finally {
-            if (wl != null && wl.isHeld()) wl.release();
-        }
-    }
-
-    private void resendTwoFactorSafely() {
-        try {
-            SharedPreferences prefs = SecurePrefs.prefs(this);
-            prefs.edit()
-                    .putBoolean("two_factor_required", false)
-                    .putString("last_error", "")
-                    .remove("pending_2fa_base_url")
-                    .apply();
-
-            SecurePrefs.putSecret(this, "pending_2fa_token", "");
-            client = null;
-
-            pollSafely();
-        } catch (Exception e) {
-            saveError(
-                    "Neuer 2FA-Code konnte nicht angefordert werden: "
-                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())
-            );
-        }
-    }
-
-    private void appendHistory(SharedPreferences prefs, LibreApiClient.Reading reading) {
-        String raw = prefs.getString("history_values", "");
-        String encoded = String.format(Locale.US, "%.3f", reading.value);
-        String next = raw.isEmpty() ? encoded : raw + ";" + encoded;
-        String[] parts = next.split(";");
-        if (parts.length > 24) {
-            StringBuilder trimmed = new StringBuilder();
-            for (int i = parts.length - 24; i < parts.length; i++) {
-                if (trimmed.length() > 0) trimmed.append(';');
-                trimmed.append(parts[i]);
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
             }
-            next = trimmed.toString();
+
+            polling.set(false);
+
+            if (scheduler != null && !scheduler.isShutdown()
+                    && SecurePrefs.prefs(this).getBoolean("enabled", false)) {
+                scheduler.schedule(this::pollSafely, nextDelay, TimeUnit.MILLISECONDS);
+            }
         }
-        prefs.edit().putString("history_values", next).apply();
     }
 
-    private void saveError(String error) {
+    private void ensureClient(SharedPreferences prefs) {
+        if (client != null) return;
+
+        client = new LibreApiClient(
+                prefs.getString("region", "AUTO"),
+                prefs.getString("session_base_url", ""),
+                SecurePrefs.getSecret(this, "session_token"),
+                prefs.getLong("session_expires_ms", 0L),
+                prefs.getString("session_account_hash", ""),
+                prefs.getString("session_patient_id", "")
+        );
+    }
+
+    private void saveSession(LibreApiClient.SessionState session) {
+        try {
+            SecurePrefs.putSecret(this, "session_token", session.token);
+        } catch (Exception ignored) {
+        }
+
         SecurePrefs.prefs(this).edit()
-                .putString("last_error", error)
+                .putString("session_base_url", session.baseUrl)
+                .putLong("session_expires_ms", session.expiresMs)
+                .putString("session_account_hash", session.accountHash)
+                .putString("session_patient_id", session.patientId)
+                .apply();
+    }
+
+    private void saveReading(LibreApiClient.FetchResult result) {
+        SharedPreferences prefs = SecurePrefs.prefs(this);
+
+        StringBuilder values = new StringBuilder();
+
+        for (LibreApiClient.Reading reading : result.history) {
+            if (values.length() > 0) values.append(';');
+            values.append(String.format(Locale.US, "%.1f", reading.mgdl));
+        }
+
+        prefs.edit()
+                .putString("last_value", result.current.displayValue())
+                .putInt("last_trend", result.current.trend)
+                .putLong("last_sensor_ms", result.current.timestampMs)
+                .putString("patient_name", result.patientName)
+                .putString("history_values", values.toString())
+                .apply();
+    }
+
+    private void saveError(String message) {
+        SecurePrefs.prefs(this).edit()
+                .putString("last_error", message == null ? "Unbekannter Fehler." : message)
                 .putLong("last_error_ms", System.currentTimeMillis())
                 .apply();
     }
 
-    private void showGlucoseNotification(LibreApiClient.Reading reading) {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        String value = reading.displayValue() + " " + reading.unit + "  " + LibreApiClient.arrow(reading.trend);
-
-        Notification notification = new Notification.Builder(this, CH_GLUCOSE)
-                .setSmallIcon(R.drawable.ic_launcher)
-                .setContentTitle(value)
-                .setContentText("LibreView Cloud • Bericht aktualisiert" +
-                        (reading.timestamp.isEmpty() ? "" : " • Sensor " + reading.timestamp))
-                .setContentIntent(openAppIntent())
-                .setOnlyAlertOnce(true)
-                .setAutoCancel(false)
-                .setShowWhen(true)
-                .setWhen(System.currentTimeMillis())
-                .setCategory(Notification.CATEGORY_STATUS)
-                .setVisibility(Notification.VISIBILITY_PUBLIC)
-                .build();
-
-        nm.notify(ID_GLUCOSE, notification);
+    private long calculateBackoff() {
+        int exponent = Math.min(Math.max(consecutiveFailures - 1, 0), 4);
+        long delay = NORMAL_INTERVAL_MS * (1L << exponent);
+        return Math.min(delay, MAX_BACKOFF_MS);
     }
 
-    private void checkAlert(LibreApiClient.Reading reading, SharedPreferences prefs) {
-        double low = parseDouble(prefs.getString("low", "70"), 70);
-        double high = parseDouble(prefs.getString("high", "180"), 180);
+    private void updateLiveNotification(
+            LibreApiClient.Reading reading,
+            boolean stale,
+            String suffix
+    ) {
+        long ageMs = Math.max(0L, System.currentTimeMillis() - reading.timestampMs);
+        stale = stale || ageMs > 5L * 60L * 1000L;
 
-        if ("mmol/L".equals(reading.unit)) {
-            low /= 18.0;
-            high /= 18.0;
+        String title = reading.displayValue()
+                + " mg/dL "
+                + LibreApiClient.arrow(reading.trend);
+
+        String text = stale
+                ? "Wert ist nicht mehr aktuell"
+                : "LibreLinkUp • vor " + ageText(ageMs);
+
+        if (suffix != null && !suffix.isEmpty()) {
+            text += " • " + suffix;
         }
 
-        String state = reading.value < low ? "LOW" : (reading.value > high ? "HIGH" : "OK");
-        if ("OK".equals(state)) {
-            lastAlertState = "OK";
+        NotificationManager manager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+
+        manager.notify(
+                NOTIFICATION_LIVE,
+                buildLiveNotification(title, text, true)
+        );
+    }
+
+    private void updateNotificationFromCache(String suffix) {
+        SharedPreferences prefs = SecurePrefs.prefs(this);
+        String value = prefs.getString("last_value", "");
+        int trend = prefs.getInt("last_trend", 0);
+        long sensorMs = prefs.getLong("last_sensor_ms", 0L);
+
+        if (!value.isEmpty() && sensorMs > 0L) {
+            LibreApiClient.Reading cached = new LibreApiClient.Reading(
+                    parseDouble(value, 0.0),
+                    trend,
+                    "",
+                    sensorMs
+            );
+            updateLiveNotification(cached, true, suffix);
             return;
         }
-        if (state.equals(lastAlertState)) return;
-        lastAlertState = state;
 
-        String title = "LOW".equals(state) ? "Glukose niedrig" : "Glukose hoch";
-        String value = reading.displayValue() + " " + reading.unit + " " + LibreApiClient.arrow(reading.trend);
+        NotificationManager manager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
 
-        Notification notification = new Notification.Builder(this, CH_ALERTS)
-                .setSmallIcon(R.drawable.ic_launcher)
+        manager.notify(
+                NOTIFICATION_LIVE,
+                buildLiveNotification("LibreMirror", suffix, false)
+        );
+    }
+
+    private void checkThresholdAlert(
+            LibreApiClient.Reading reading,
+            SharedPreferences prefs
+    ) {
+        double low = parseDouble(prefs.getString("low", "70"), 70.0);
+        double high = parseDouble(prefs.getString("high", "180"), 180.0);
+
+        String state = reading.mgdl < low
+                ? "LOW"
+                : reading.mgdl > high
+                ? "HIGH"
+                : "NORMAL";
+
+        String previous = prefs.getString("alert_state", "NORMAL");
+        long lastAlert = prefs.getLong("last_alert_ms", 0L);
+        long now = System.currentTimeMillis();
+
+        boolean repeat = !"NORMAL".equals(state)
+                && state.equals(previous)
+                && now - lastAlert >= ALERT_REPEAT_MS;
+
+        boolean newAlert = !"NORMAL".equals(state) && !state.equals(previous);
+
+        prefs.edit().putString("alert_state", state).apply();
+
+        if (!newAlert && !repeat) return;
+
+        String title = "LOW".equals(state)
+                ? "Glukose niedrig"
+                : "Glukose hoch";
+
+        String body = reading.displayValue()
+                + " mg/dL "
+                + LibreApiClient.arrow(reading.trend);
+
+        Notification notification = new Notification.Builder(this, CHANNEL_ALERTS)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
-                .setContentText(value)
-                .setContentIntent(openAppIntent())
-                .setAutoCancel(true)
+                .setContentText(body)
                 .setCategory(Notification.CATEGORY_ALARM)
-                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setAutoCancel(true)
+                .setContentIntent(mainPendingIntent())
                 .build();
 
-        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(ID_ALERT, notification);
+        NotificationManager manager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        manager.notify(NOTIFICATION_ALERT, notification);
 
-        if (prefs.getBoolean("car_voice", true) && isCarMode() && ttsReady) {
-            String spoken = ("LOW".equals(state) ? "Glukose niedrig. " : "Glukose hoch. ")
-                    + reading.displayValue() + " "
-                    + ("mg/dL".equals(reading.unit)
-                    ? "Milligramm pro Deziliter"
-                    : "Millimol pro Liter");
-            tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "libremirror-alert");
+        prefs.edit().putLong("last_alert_ms", now).apply();
+
+        if (prefs.getBoolean("car_voice", true) && isCarMode()) {
+            speak(title + ". " + reading.displayValue() + " Milligramm pro Deziliter.");
         }
+    }
+
+    private Notification buildLiveNotification(
+            String title,
+            String text,
+            boolean ongoing
+    ) {
+        return new Notification.Builder(this, CHANNEL_LIVE)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .setOnlyAlertOnce(true)
+                .setOngoing(ongoing)
+                .setShowWhen(false)
+                .setContentIntent(mainPendingIntent())
+                .build();
+    }
+
+    private PendingIntent mainPendingIntent() {
+        Intent open = new Intent(this, MainActivity.class);
+        open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+        return PendingIntent.getActivity(
+                this,
+                0,
+                open,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+    }
+
+    private void createNotificationChannels() {
+        NotificationManager manager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+
+        NotificationChannel live = new NotificationChannel(
+                CHANNEL_LIVE,
+                "Live-Glukose",
+                NotificationManager.IMPORTANCE_LOW
+        );
+        live.setDescription("Laufender Glukosewert für Handy und Smartwatch.");
+        live.setShowBadge(false);
+
+        NotificationChannel alerts = new NotificationChannel(
+                CHANNEL_ALERTS,
+                "Glukose-Warnungen",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        alerts.setDescription("Warnungen bei Über- oder Unterschreitung deiner Grenzwerte.");
+        alerts.enableVibration(true);
+
+        manager.createNotificationChannel(live);
+        manager.createNotificationChannel(alerts);
     }
 
     private boolean isCarMode() {
-        UiModeManager modeManager = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
-        return modeManager != null && modeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_CAR;
+        UiModeManager manager = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
+        return manager != null
+                && manager.getCurrentModeType() == Configuration.UI_MODE_TYPE_CAR;
     }
 
-    private PendingIntent openAppIntent() {
-        Intent intent = new Intent(this, MainActivity.class);
-        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
-        return PendingIntent.getActivity(this, 0, intent, flags);
+    private void speak(String text) {
+        if (tts == null) {
+            tts = new TextToSpeech(
+                    getApplicationContext(),
+                    status -> {
+                        if (status == TextToSpeech.SUCCESS) {
+                            tts.setLanguage(Locale.GERMAN);
+                            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "libremirror-alert");
+                        }
+                    }
+            );
+        } else {
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "libremirror-alert");
+        }
     }
 
-    private Notification serviceNotification(String title, String text) {
-        return new Notification.Builder(this, CH_SERVICE)
-                .setSmallIcon(R.drawable.ic_launcher)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setContentIntent(openAppIntent())
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setCategory(Notification.CATEGORY_SERVICE)
-                .build();
-    }
+    private static String ageText(long ageMs) {
+        long seconds = Math.max(0L, ageMs / 1000L);
 
-    private void updateService(String text) {
-        ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
-                .notify(ID_SERVICE, serviceNotification("LibreMirror aktiv", text));
-    }
-
-    private void createChannels() {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-
-        NotificationChannel service = new NotificationChannel(
-                CH_SERVICE, "LibreMirror Hintergrunddienst", NotificationManager.IMPORTANCE_MIN);
-        service.setSound(null, null);
-        service.enableVibration(false);
-        service.setShowBadge(false);
-        nm.createNotificationChannel(service);
-
-        NotificationChannel glucose = new NotificationChannel(
-                CH_GLUCOSE, "Aktueller Glukosewert", NotificationManager.IMPORTANCE_DEFAULT);
-        glucose.setSound(null, null);
-        glucose.enableVibration(false);
-        glucose.setDescription("Wird auf unterstützte Smartwatches gespiegelt.");
-        nm.createNotificationChannel(glucose);
-
-        NotificationChannel alerts = new NotificationChannel(
-                CH_ALERTS, "Glukosewarnungen", NotificationManager.IMPORTANCE_HIGH);
-        alerts.enableVibration(true);
-        nm.createNotificationChannel(alerts);
+        if (seconds < 60L) return "weniger als 1 Min.";
+        long minutes = seconds / 60L;
+        if (minutes == 1L) return "1 Min.";
+        return minutes + " Min.";
     }
 
     private static double parseDouble(String value, double fallback) {
+        if (value == null) return fallback;
+
         try {
             return Double.parseDouble(value.replace(',', '.'));
-        } catch (Exception e) {
+        } catch (Exception ignored) {
             return fallback;
         }
     }
 
     @Override
     public void onDestroy() {
-        if (scheduler != null) scheduler.shutdownNow();
-        if (tts != null) tts.shutdown();
+        if (scheduler != null) {
+            scheduler.shutdownNow();
+            scheduler = null;
+        }
+
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+            tts = null;
+        }
+
+        client = null;
         super.onDestroy();
     }
 
