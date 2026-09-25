@@ -17,6 +17,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
@@ -39,6 +40,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
+import de.assimoe.libremirror.core.SyncMetricsStore;
 import de.assimoe.libremirror.core.SyncStatus;
 import de.assimoe.libremirror.data.GlucoseRepository;
 
@@ -84,6 +86,16 @@ public class MainActivity extends Activity {
     private Spinner syncInterval;
     private Switch carVoice;
     private Switch darkModeSwitch;
+    private Switch adaptiveSyncSwitch;
+
+    private TextView metricSyncsView;
+    private TextView metricApiView;
+    private TextView metricWakeupsView;
+    private TextView metricFailuresView;
+    private TextView metricDurationView;
+    private TextView metricNextSyncView;
+    private TextView metricReasonView;
+    private TextView batteryOptimizationView;
 
     private TextView valueView;
     private TextView unitView;
