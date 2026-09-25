@@ -648,7 +648,7 @@ public class MainActivity extends Activity {
         card.addView(sectionHeader(
                 android.R.drawable.ic_dialog_alert,
                 "Warnungen",
-                "Eigene Grenzwerte und Auto-Sprachausgabe."
+                "Grenzwerte, Sperrbildschirm und Car-Modus."
         ));
 
         LinearLayout limits = new LinearLayout(this);
@@ -685,8 +685,8 @@ public class MainActivity extends Activity {
         card.addView(
                 settingSwitchRow(
                         R.drawable.ic_car,
-                        "Auto-Sprachwarnungen",
-                        "Grenzwertwarnungen im Car-Modus vorlesen.",
+                        "Car-Modus-Warnungen",
+                        "High/Low sichtbar melden und im Car-Modus zusätzlich vorlesen.",
                         carVoice
                 ),
                 fullTop(12)
