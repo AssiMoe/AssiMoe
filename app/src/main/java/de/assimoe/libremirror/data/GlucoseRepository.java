@@ -52,6 +52,13 @@ public final class GlucoseRepository {
         maintenanceExecutor.execute(this::migrateLegacyDataIfNeeded);
     }
 
+    public void clearAllAsync() {
+        maintenanceExecutor.execute(() -> {
+            database.glucoseDao().deleteAll();
+            database.syncEventDao().deleteAll();
+        });
+    }
+
     public void migrateLegacyDataIfNeeded() {
         SharedPreferences prefs = SecurePrefs.prefs(appContext);
 
