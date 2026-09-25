@@ -4,6 +4,8 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.NotificationManager;
+import android.appwidget.AppWidgetManager;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -76,6 +78,7 @@ public class MainActivity extends Activity {
     private EditText low;
     private EditText high;
     private Spinner region;
+    private Spinner syncInterval;
     private Switch carVoice;
     private Switch darkModeSwitch;
 
@@ -503,6 +506,7 @@ public class MainActivity extends Activity {
         root.addView(buildAccountSettings(), fullTop(14));
         root.addView(buildAlertSettings(), fullTop(14));
         root.addView(buildAppearanceSettings(), fullTop(14));
+        root.addView(buildWidgetSettings(), fullTop(14));
         root.addView(buildServiceSettings(), fullTop(14));
 
         TextView footer = text(
@@ -724,14 +728,97 @@ public class MainActivity extends Activity {
         return card;
     }
 
+    private View buildWidgetSettings() {
+        LinearLayout card = card(false);
+
+        card.addView(sectionHeader(
+                R.drawable.ic_nav_now,
+                "Widget & Sperrbildschirm",
+                "Glukosewert kompakt auf Galaxy und Homescreen."
+        ));
+
+        TextView note = text(
+                "LibreMirror enthält ein eigenes Android-Widget. Auf Samsung kann es über Good Lock → LockStar "
+                        + "auch auf Sperrbildschirm und AOD platziert werden.",
+                12,
+                false,
+                textSecondary
+        );
+        note.setLineSpacing(dp(1), 1.08f);
+        card.addView(note, fullTop(12));
+
+        Button pin = secondaryButton("Widget zum Startbildschirm hinzufügen");
+        pin.setOnClickListener(v -> pinWidget());
+        card.addView(pin, fullHeightTop(50, 12));
+
+        return card;
+    }
+
     private View buildServiceSettings() {
         LinearLayout card = card(false);
 
         card.addView(sectionHeader(
                 R.drawable.ic_live,
                 "Live-Dienst",
-                "Synchronisierung, Watch und lokale Daten."
+                "Synchronisierung, Akku und Watch."
         ));
+
+        LinearLayout intervalBox = new LinearLayout(this);
+        intervalBox.setOrientation(LinearLayout.VERTICAL);
+        intervalBox.setBackground(roundedWithStroke(fieldBg, border, 16));
+        intervalBox.setPadding(dp(14), dp(9), dp(10), dp(8));
+
+        intervalBox.addView(text("Aktualisierungsintervall", 11, true, textSecondary));
+
+        syncInterval = new Spinner(this);
+        String[] intervals = {
+                "1 Minute – Live",
+                "2 Minuten",
+                "3 Minuten",
+                "5 Minuten – sparsamer",
+                "10 Minuten",
+                "15 Minuten"
+        };
+
+        ArrayAdapter<String> intervalAdapter = new ArrayAdapter<String>(
+                this,
+                android.R.layout.simple_spinner_dropdown_item,
+                intervals
+        ) {
+            @Override
+            public View getView(
+                    int position,
+                    View convertView,
+                    android.view.ViewGroup parent
+            ) {
+                TextView view = (TextView) super.getView(position, convertView, parent);
+                view.setTextColor(textPrimary);
+                view.setTextSize(16);
+                view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                view.setPadding(0, 0, 0, 0);
+                return view;
+            }
+        };
+
+        syncInterval.setAdapter(intervalAdapter);
+        syncInterval.setBackgroundColor(Color.TRANSPARENT);
+        intervalBox.addView(
+                syncInterval,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(42)
+                )
+        );
+
+        TextView batteryHint = text(
+                "1 Minute = aktuellste Werte. Größere Intervalle reduzieren Netzwerkzugriffe und Akkuverbrauch.",
+                11,
+                false,
+                textMuted
+        );
+        intervalBox.addView(batteryHint, fullTop(4));
+
+        card.addView(intervalBox, fullTop(14));
 
         startButton = primaryButton("▶   Speichern & Live starten");
         startButton.setOnClickListener(v -> saveAndStart());
@@ -839,6 +926,7 @@ public class MainActivity extends Activity {
                     .putString("low", formatNumber(lowValue))
                     .putString("high", formatNumber(highValue))
                     .putBoolean("car_voice", carVoice.isChecked())
+                    .putInt("sync_interval_min", selectedSyncIntervalMinutes())
                     .putBoolean("enabled", true)
                     .remove("session_base_url")
                     .remove("session_expires_ms")
@@ -870,6 +958,78 @@ public class MainActivity extends Activity {
         toast("Aktualisierung angefordert");
     }
 
+    private void pinWidget() {
+        AppWidgetManager manager = AppWidgetManager.getInstance(this);
+        ComponentName provider = new ComponentName(
+                this,
+                LibreMirrorWidgetProvider.class
+        );
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && manager.isRequestPinAppWidgetSupported()) {
+            boolean requested = manager.requestPinAppWidget(
+                    provider,
+                    null,
+                    null
+            );
+
+            if (requested) {
+                toast("Widget-Anfrage geöffnet");
+            } else {
+                toast("Widget konnte nicht automatisch angeheftet werden");
+            }
+        } else {
+            toast("Homescreen gedrückt halten → Widgets → LibreMirror");
+        }
+    }
+
+    private int selectedSyncIntervalMinutes() {
+        if (syncInterval == null) return 1;
+
+        switch (syncInterval.getSelectedItemPosition()) {
+            case 1: return 2;
+            case 2: return 3;
+            case 3: return 5;
+            case 4: return 10;
+            case 5: return 15;
+            default: return 1;
+        }
+    }
+
+    private void setSyncIntervalSelection(int minutes) {
+        if (syncInterval == null) return;
+
+        int position;
+
+        switch (minutes) {
+            case 2:
+                position = 1;
+                break;
+            case 3:
+                position = 2;
+                break;
+            case 5:
+                position = 3;
+                break;
+            case 10:
+                position = 4;
+                break;
+            case 15:
+                position = 5;
+                break;
+            default:
+                position = 0;
+                break;
+        }
+
+        syncInterval.setSelection(position);
+    }
+
+    private static String syncIntervalLabel(int minutes) {
+        if (minutes <= 1) return "1 Minute";
+        return minutes + " Minuten";
+    }
+
     private void confirmLogout() {
         new AlertDialog.Builder(this)
                 .setTitle("LibreMirror zurücksetzen")
@@ -897,7 +1057,10 @@ public class MainActivity extends Activity {
         low.setText("70");
         high.setText("180");
         region.setSelection(0);
+        setSyncIntervalSelection(1);
         carVoice.setChecked(true);
+
+        LibreMirrorWidgetProvider.updateAll(this);
 
         toast("Lokale LibreMirror-Daten gelöscht");
         showPage(0);
@@ -922,6 +1085,7 @@ public class MainActivity extends Activity {
         low.setText(prefs.getString("low", "70"));
         high.setText(prefs.getString("high", "180"));
         carVoice.setChecked(prefs.getBoolean("car_voice", true));
+        setSyncIntervalSelection(prefs.getInt("sync_interval_min", 1));
 
         if (prefs.getBoolean("enabled", false)) {
             startServiceCompat(new Intent(this, LibreService.class));
@@ -981,9 +1145,10 @@ public class MainActivity extends Activity {
 
         patientView.setText(patient.isEmpty() ? "Freigabe: —" : "Freigabe: " + patient);
 
+        int syncMinutes = prefs.getInt("sync_interval_min", 1);
         serviceStatusView.setText(
                 enabled
-                        ? "Live-Dienst: aktiv • ca. alle 60 Sekunden"
+                        ? "Live-Dienst: aktiv • alle " + syncIntervalLabel(syncMinutes)
                         : "Live-Dienst: aus"
         );
         serviceStatusView.setTextColor(enabled ? GREEN : textSecondary);
