@@ -49,17 +49,29 @@ public final class SyncMetricsStore {
                 .apply();
     }
 
-    public static void recordFailure(Context context, long durationMs) {
+    public static void recordFailure(
+            Context context,
+            long durationMs,
+            boolean retry
+    ) {
         SharedPreferences prefs = prepared(context);
-        prefs.edit()
+        SharedPreferences.Editor editor = prefs.edit()
                 .putInt(PREFIX + "failures", prefs.getInt(PREFIX + "failures", 0) + 1)
                 .putLong(PREFIX + "last_duration_ms", Math.max(0L, durationMs))
                 .putLong(
                         PREFIX + "total_duration_ms",
                         prefs.getLong(PREFIX + "total_duration_ms", 0L)
                                 + Math.max(0L, durationMs)
-                )
-                .apply();
+                );
+
+        if (retry) {
+            editor.putInt(
+                    PREFIX + "retries",
+                    prefs.getInt(PREFIX + "retries", 0) + 1
+            );
+        }
+
+        editor.apply();
     }
 
     public static void setSchedule(
@@ -90,6 +102,7 @@ public final class SyncMetricsStore {
                 prefs.getInt(PREFIX + "wakeups", 0),
                 prefs.getInt(PREFIX + "successes", 0),
                 prefs.getInt(PREFIX + "failures", 0),
+                prefs.getInt(PREFIX + "retries", 0),
                 prefs.getLong(PREFIX + "last_duration_ms", 0L),
                 prefs.getLong(PREFIX + "total_duration_ms", 0L),
                 prefs.getLong(PREFIX + "next_sync_at_ms", 0L),
@@ -112,6 +125,7 @@ public final class SyncMetricsStore {
                     .putInt(PREFIX + "wakeups", 0)
                     .putInt(PREFIX + "successes", 0)
                     .putInt(PREFIX + "failures", 0)
+                    .putInt(PREFIX + "retries", 0)
                     .putLong(PREFIX + "last_duration_ms", 0L)
                     .putLong(PREFIX + "total_duration_ms", 0L)
                     .putLong(PREFIX + "next_sync_at_ms", 0L)
@@ -133,6 +147,7 @@ public final class SyncMetricsStore {
         public final int wakeups;
         public final int successes;
         public final int failures;
+        public final int retries;
         public final long lastDurationMs;
         public final long totalDurationMs;
         public final long nextSyncAtMs;
@@ -146,6 +161,7 @@ public final class SyncMetricsStore {
                 int wakeups,
                 int successes,
                 int failures,
+                int retries,
                 long lastDurationMs,
                 long totalDurationMs,
                 long nextSyncAtMs,
@@ -158,6 +174,7 @@ public final class SyncMetricsStore {
             this.wakeups = wakeups;
             this.successes = successes;
             this.failures = failures;
+            this.retries = retries;
             this.lastDurationMs = lastDurationMs;
             this.totalDurationMs = totalDurationMs;
             this.nextSyncAtMs = nextSyncAtMs;
