@@ -754,7 +754,7 @@ public class MainActivity extends Activity {
         card.addView(sectionHeader(
                 android.R.drawable.ic_dialog_alert,
                 "Warnungen",
-                "Grenzwerte, Sperrbildschirm und Car-Modus."
+                "Grenzwerte, Trend, Wiederholung und Ruhezeiten."
         ));
 
         LinearLayout limits = new LinearLayout(this);
@@ -787,15 +787,166 @@ public class MainActivity extends Activity {
 
         card.addView(limits, fullTop(14));
 
+        LinearLayout criticalBox = smallNumberBox("Kritisch niedrig");
+        criticalLow = (EditText) criticalBox.getChildAt(1);
+        card.addView(criticalBox, fullTop(10));
+
+        LinearLayout repeatBox = smallNumberBox("Warnung wiederholen nach Min.");
+        alertRepeat = (EditText) repeatBox.getChildAt(1);
+        card.addView(repeatBox, fullTop(10));
+
+        LinearLayout staleBox = smallNumberBox("Veraltet-Warnung nach Min.");
+        staleMinutes = (EditText) staleBox.getChildAt(1);
+        card.addView(staleBox, fullTop(10));
+
+        trendAlerts = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_nav_history,
+                        "Schnelle Trendwarnungen",
+                        "Warnt zusätzlich bei starkem Steigen oder Fallen.",
+                        trendAlerts
+                ),
+                fullTop(12)
+        );
+
+        staleAlerts = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_live,
+                        "Veraltete Werte melden",
+                        "Warnt, wenn längere Zeit kein neuer Sensorwert kommt.",
+                        staleAlerts
+                ),
+                fullTop(8)
+        );
+
+        cloudAlerts = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_live,
+                        "Cloud-/Offline-Warnungen",
+                        "Unterscheidet Internet-, Cloud- und Konto-Probleme.",
+                        cloudAlerts
+                ),
+                fullTop(8)
+        );
+
+        quietHours = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_theme,
+                        "Ruhezeiten",
+                        "Unterdrückt nicht-kritische Warnungen in diesem Zeitraum.",
+                        quietHours
+                ),
+                fullTop(8)
+        );
+
+        LinearLayout quietRow = new LinearLayout(this);
+        quietRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        quietStart = field(
+                "22:00",
+                InputType.TYPE_CLASS_DATETIME | InputType.TYPE_DATETIME_VARIATION_TIME
+        );
+        quietEnd = field(
+                "07:00",
+                InputType.TYPE_CLASS_DATETIME | InputType.TYPE_DATETIME_VARIATION_TIME
+        );
+
+        quietRow.addView(
+                quietStart,
+                new LinearLayout.LayoutParams(
+                        0,
+                        dp(56),
+                        1f
+                )
+        );
+
+        View timeGap = new View(this);
+        quietRow.addView(timeGap, new LinearLayout.LayoutParams(dp(10), 1));
+
+        quietRow.addView(
+                quietEnd,
+                new LinearLayout.LayoutParams(
+                        0,
+                        dp(56),
+                        1f
+                )
+        );
+
+        card.addView(quietRow, fullTop(10));
+
+        return card;
+    }
+
+    private View buildAutomationSettings() {
+        LinearLayout card = card(false);
+
+        card.addView(sectionHeader(
+                R.drawable.ic_live,
+                "Automatik & Privat",
+                "Adaptive Aktualisierung, Auto-Modus und Privatsphäre."
+        ));
+
+        adaptiveSync = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_live,
+                        "Adaptive Aktualisierung",
+                        "Bei dynamischem Trend oder Nähe zum Grenzwert automatisch auf 1 Minute.",
+                        adaptiveSync
+                ),
+                fullTop(12)
+        );
+
+        autoMode = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_car,
+                        "Auto-Modus",
+                        "Aktiviert Car-Sprachausgabe und den großen Fahrmodus.",
+                        autoMode
+                ),
+                fullTop(8)
+        );
+
         carVoice = new Switch(this);
         card.addView(
                 settingSwitchRow(
                         R.drawable.ic_car,
-                        "Car-Modus-Warnungen",
-                        "High/Low sichtbar melden und im Car-Modus zusätzlich vorlesen.",
+                        "Sprachwarnungen im Auto",
+                        "High/Low und schnelle Trends zusätzlich vorlesen.",
                         carVoice
                 ),
-                fullTop(12)
+                fullTop(8)
+        );
+
+        Button autoScreen = secondaryButton("Auto-Anzeige öffnen");
+        autoScreen.setOnClickListener(v -> {
+            if (!autoMode.isChecked()) {
+                toast("Auto-Modus zuerst aktivieren");
+                return;
+            }
+
+            SecurePrefs.prefs(this).edit()
+                    .putBoolean("auto_mode_manual", true)
+                    .apply();
+
+            startActivity(new Intent(this, AutoModeActivity.class));
+        });
+        card.addView(autoScreen, fullHeightTop(48, 10));
+
+        privateMode = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_theme,
+                        "Privatmodus",
+                        "Blendet Werte auf gesperrtem Handy, Widgets und Wear OS aus.",
+                        privateMode
+                ),
+                fullTop(10)
         );
 
         return card;
