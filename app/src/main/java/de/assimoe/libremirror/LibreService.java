@@ -222,7 +222,8 @@ public class LibreService extends Service {
 
             SyncMetricsStore.recordFailure(
                     this,
-                    durationMs
+                    durationMs,
+                    consecutiveFailures > 1
             );
 
             if (error instanceof LibreApiClient.RateLimitException) {
