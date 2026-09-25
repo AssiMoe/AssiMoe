@@ -18,7 +18,10 @@ public class GlucoseComplicationService extends ComplicationDataSourceService {
             ComplicationRequest request,
             ComplicationRequestListener listener
     ) {
-        listener.onComplicationData(buildCurrent(request.getComplicationType()));
+        try {
+            listener.onComplicationData(buildCurrent(request.getComplicationType()));
+        } catch (android.os.RemoteException ignored) {
+        }
     }
 
     @Override
