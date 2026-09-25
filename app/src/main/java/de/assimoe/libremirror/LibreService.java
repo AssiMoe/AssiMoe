@@ -214,6 +214,8 @@ public class LibreService extends Service {
                 .putString("last_error", message == null ? "Unbekannter Fehler." : message)
                 .putLong("last_error_ms", System.currentTimeMillis())
                 .apply();
+
+        LibreMirrorWidgetProvider.updateAll(this);
     }
 
     private long calculateBackoff() {
