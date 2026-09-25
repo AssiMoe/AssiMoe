@@ -10,8 +10,8 @@ android {
         applicationId 'de.assimoe.libremirror'
         minSdk 26
         targetSdk 33
-        versionCode 200
-        versionName '2.0.0-alpha1'
+        versionCode 201
+        versionName '2.0.0-alpha2'
 
         javaCompileOptions {
             annotationProcessorOptions {
