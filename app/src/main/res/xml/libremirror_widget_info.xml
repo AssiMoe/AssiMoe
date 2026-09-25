@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="180dp"
-    android:minHeight="72dp"
+    android:minWidth="210dp"
+    android:minHeight="105dp"
     android:updatePeriodMillis="0"
-    android:initialLayout="@layout/widget_libremirror"
+    android:initialLayout="@layout/widget_compact"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen|keyguard"
     android:description="@string/widget_description" />
