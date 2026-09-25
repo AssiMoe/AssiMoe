@@ -36,6 +36,7 @@ public final class LibreApiClient {
     private long authExpiresMs;
     private String accountHash;
     private String patientId;
+    private RequestObserver requestObserver;
 
     public LibreApiClient(
             String region,
@@ -53,6 +54,10 @@ public final class LibreApiClient {
         authExpiresMs = cachedExpiresMs;
         accountHash = emptyToNull(cachedAccountHash);
         patientId = emptyToNull(cachedPatientId);
+    }
+
+    public void setRequestObserver(RequestObserver requestObserver) {
+        this.requestObserver = requestObserver;
     }
 
     public FetchResult fetch(String email, String password) throws Exception {
@@ -387,6 +392,10 @@ public final class LibreApiClient {
     }
 
     private Response request(String method, String url, JSONObject body, boolean authenticated) throws Exception {
+        if (requestObserver != null) {
+            requestObserver.onRequest();
+        }
+
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod(method);
         connection.setConnectTimeout(15000);
@@ -743,6 +752,10 @@ public final class LibreApiClient {
             this.httpCode = httpCode;
             this.body = body;
         }
+    }
+
+    public interface RequestObserver {
+        void onRequest();
     }
 
     public static class UserVisibleException extends Exception {
