@@ -43,7 +43,7 @@ public class LibreService extends Service {
         startForeground(ID_SERVICE, serviceNotification("LibreMirror läuft", "Warte auf ersten Wert …"));
         tts = new TextToSpeech(this, status -> ttsReady = status == TextToSpeech.SUCCESS);
         scheduler = Executors.newSingleThreadScheduledExecutor();
-        scheduler.scheduleWithFixedDelay(this::pollSafely, 0, 60, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(this::pollSafely, 0, 5, TimeUnit.MINUTES);
     }
 
     @Override
@@ -59,7 +59,7 @@ public class LibreService extends Service {
         try {
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
             wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LibreMirror:poll");
-            wl.acquire(30000);
+            wl.acquire(90000);
 
             SharedPreferences p = SecurePrefs.prefs(this);
 
@@ -72,6 +72,7 @@ public class LibreService extends Service {
             }
 
             if (client == null) client = new LibreApiClient(p.getString("region", "AUTO"));
+            String previousSensorTime = p.getString("last_sensor_time", "");
             LibreApiClient.Reading reading = client.fetch(email, password);
 
             p.edit()
@@ -83,10 +84,12 @@ public class LibreService extends Service {
                     .putString("last_error", "")
                     .apply();
 
-            appendHistory(p, reading);
+            if (!reading.timestamp.equals(previousSensorTime)) {
+                appendHistory(p, reading);
+            }
             showGlucoseNotification(reading);
             checkAlert(reading, p);
-            updateService("Letzter Abruf " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date()));
+            updateService("LibreView-Bericht aktualisiert " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date()));
         } catch (Exception e) {
             saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             updateService("Fehler beim Abruf");
@@ -125,7 +128,7 @@ public class LibreService extends Service {
         Notification notification = new Notification.Builder(this, CH_GLUCOSE)
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle(value)
-                .setContentText("LibreMirror • gerade aktualisiert" +
+                .setContentText("LibreView Cloud • Bericht aktualisiert" +
                         (reading.timestamp.isEmpty() ? "" : " • Sensor " + reading.timestamp))
                 .setContentIntent(openAppIntent())
                 .setOnlyAlertOnce(true)
