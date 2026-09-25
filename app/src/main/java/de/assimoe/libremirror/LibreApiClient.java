@@ -7,6 +7,8 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.InflaterInputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -415,7 +417,16 @@ public final class LibreApiClient {
     private JSONObject requestJson(String method, String url, JSONObject body, boolean authenticated) throws Exception {
         String text = requestText(method, url, body, authenticated);
         if (text.isEmpty()) return new JSONObject();
-        return new JSONObject(text);
+        try {
+            return new JSONObject(text);
+        } catch (Exception e) {
+            String preview = compact(text);
+            throw new Exception(
+                    "LibreView-Antwort ist kein gültiges JSON"
+                            + (preview.isEmpty() ? "." : ": " + preview),
+                    e
+            );
+        }
     }
 
     private String requestText(String method, String url, JSONObject body, boolean authenticated) throws Exception {
@@ -429,7 +440,6 @@ public final class LibreApiClient {
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setRequestProperty("Cache-Control", "no-cache");
         connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-        connection.setRequestProperty("Accept-Encoding", "gzip, deflate");
         connection.setRequestProperty("product", "llu.android");
         connection.setRequestProperty("version", "4.17.0");
         connection.setRequestProperty("Pragma", "no-cache");
@@ -452,6 +462,16 @@ public final class LibreApiClient {
         InputStream stream = code >= 200 && code < 300
                 ? connection.getInputStream()
                 : connection.getErrorStream();
+
+        String contentEncoding = connection.getContentEncoding();
+        if (stream != null && contentEncoding != null) {
+            if ("gzip".equalsIgnoreCase(contentEncoding)) {
+                stream = new GZIPInputStream(stream);
+            } else if ("deflate".equalsIgnoreCase(contentEncoding)) {
+                stream = new InflaterInputStream(stream);
+            }
+        }
+
         String text = readAll(stream);
         connection.disconnect();
 
