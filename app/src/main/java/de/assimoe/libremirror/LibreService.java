@@ -104,6 +104,7 @@ public class LibreService extends Service {
                     .putBoolean("two_factor_required", false)
                     .remove("terms_step")
                     .remove("pending_2fa_base_url")
+                    .remove("pending_2fa_mode")
                     .apply();
 
             if (!reading.timestamp.equals(previousSensorTime)) {
@@ -193,11 +194,12 @@ public class LibreService extends Service {
                 throw new Exception("LibreView-2FA konnte nicht gestartet werden, weil die Login-Sitzung fehlt.");
             }
 
-            client.sendTwoFactorCode();
+            String twoFactorMode = client.sendTwoFactorCode();
 
             SecurePrefs.putSecret(this, "pending_2fa_token", client.getAuthToken());
             prefs.edit()
                     .putString("pending_2fa_base_url", client.getBaseUrl())
+                    .putString("pending_2fa_mode", twoFactorMode)
                     .putBoolean("two_factor_required", true)
                     .putBoolean("terms_required", false)
                     .remove("terms_step")
@@ -236,6 +238,7 @@ public class LibreService extends Service {
 
             String pendingToken = SecurePrefs.getSecret(this, "pending_2fa_token");
             String pendingBaseUrl = prefs.getString("pending_2fa_base_url", "");
+            String pendingMode = prefs.getString("pending_2fa_mode", "BOOL_TRUE");
 
             if (pendingToken.isEmpty()) {
                 throw new Exception(
@@ -243,7 +246,7 @@ public class LibreService extends Service {
                 );
             }
 
-            client.restoreTwoFactorSession(pendingToken, pendingBaseUrl);
+            client.restoreTwoFactorSession(pendingToken, pendingBaseUrl, pendingMode);
             LibreApiClient.Reading reading = client.verifyTwoFactorAndFetch(code.trim());
 
             String previousSensorTime = prefs.getString("last_sensor_time", "");
@@ -253,6 +256,7 @@ public class LibreService extends Service {
                     .putBoolean("terms_required", false)
                     .remove("terms_step")
                     .remove("pending_2fa_base_url")
+                    .remove("pending_2fa_mode")
                     .putString("last_value", reading.displayValue())
                     .putString("last_unit", reading.unit)
                     .putInt("last_trend", reading.trend)
