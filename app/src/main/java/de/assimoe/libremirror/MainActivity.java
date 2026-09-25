@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
 
         row.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView version = text("0.3.4", 12, true, BLUE);
+        TextView version = text("0.3.5", 12, true, BLUE);
         version.setGravity(Gravity.CENTER);
         version.setBackground(rounded(0xFFE7F3FF, 18));
         version.setPadding(dp(10), dp(6), dp(10), dp(6));
