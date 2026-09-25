@@ -2,7 +2,9 @@ package de.assimoe.libremirror;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -116,6 +118,7 @@ public final class UpdateManager {
             }
         }
 
+        verifyPackageAndSigner(context, apk);
         return apk;
     }
 
@@ -143,6 +146,76 @@ public final class UpdateManager {
         intent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
         intent.putExtra(Intent.EXTRA_RETURN_RESULT, false);
         return intent;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static void verifyPackageAndSigner(Context context, File apk) throws Exception {
+        PackageManager pm = context.getPackageManager();
+
+        int archiveFlags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? PackageManager.GET_SIGNING_CERTIFICATES
+                : PackageManager.GET_SIGNATURES;
+
+        PackageInfo archive = pm.getPackageArchiveInfo(apk.getAbsolutePath(), archiveFlags);
+
+        if (archive == null || !context.getPackageName().equals(archive.packageName)) {
+            apk.delete();
+            throw new Exception("Update-APK gehört nicht zu LibreMirror.");
+        }
+
+        PackageInfo installed = pm.getPackageInfo(context.getPackageName(), archiveFlags);
+
+        Signature[] installedSignatures = signatures(installed);
+        Signature[] archiveSignatures = signatures(archive);
+
+        if (installedSignatures.length == 0 || archiveSignatures.length == 0) {
+            apk.delete();
+            throw new Exception("APK-Signatur konnte nicht geprüft werden.");
+        }
+
+        String installedSha = signatureSha256(installedSignatures[0]);
+        String archiveSha = signatureSha256(archiveSignatures[0]);
+
+        if (!installedSha.equalsIgnoreCase(archiveSha)) {
+            apk.delete();
+            throw new Exception("Update-APK wurde nicht mit dem LibreMirror-Schlüssel signiert.");
+        }
+
+        long installedVersion = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? installed.getLongVersionCode()
+                : installed.versionCode;
+
+        long archiveVersion = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? archive.getLongVersionCode()
+                : archive.versionCode;
+
+        if (archiveVersion <= installedVersion) {
+            apk.delete();
+            throw new Exception("Update-Version ist nicht neuer als die installierte Version.");
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static Signature[] signatures(PackageInfo info) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && info.signingInfo != null) {
+            if (info.signingInfo.hasMultipleSigners()) {
+                return info.signingInfo.getApkContentsSigners();
+            }
+            return info.signingInfo.getSigningCertificateHistory();
+        }
+
+        return info.signatures == null ? new Signature[0] : info.signatures;
+    }
+
+    private static String signatureSha256(Signature signature) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] bytes = digest.digest(signature.toByteArray());
+
+        StringBuilder hex = new StringBuilder();
+        for (byte b : bytes) {
+            hex.append(String.format(Locale.US, "%02x", b));
+        }
+        return hex.toString();
     }
 
     private static String sha256(File file) throws Exception {
