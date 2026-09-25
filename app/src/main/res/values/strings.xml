@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LibreMirror</string>
-    <string name="widget_description">Aktueller Glukosewert und Trend</string>
+    <string name="widget_description">LibreMirror Compact – Wert, Trend und Status</string>
+    <string name="widget_mini_description">LibreMirror Mini – kompakt für LockStar und AOD</string>
+    <string name="widget_clean_description">LibreMirror Clean – Sperrbildschirm mit Wert und Status</string>
+    <string name="widget_large_description">LibreMirror Large – Glukosewert mit Verlaufskurve</string>
+    <string name="widget_alert_description">LibreMirror Alert – farbiger Grenzwertstatus</string>
 </resources>
