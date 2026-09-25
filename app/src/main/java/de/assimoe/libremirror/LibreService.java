@@ -95,12 +95,13 @@ public class LibreService extends Service {
 
     private void appendHistory(SharedPreferences prefs, LibreApiClient.Reading reading) {
         String raw = prefs.getString("history_values", "");
-        String next = raw.isEmpty() ? reading.displayValue() : raw + "," + reading.displayValue();
-        String[] parts = next.split(",");
+        String encoded = String.format(Locale.US, "%.3f", reading.value);
+        String next = raw.isEmpty() ? encoded : raw + ";" + encoded;
+        String[] parts = next.split(";");
         if (parts.length > 24) {
             StringBuilder trimmed = new StringBuilder();
             for (int i = parts.length - 24; i < parts.length; i++) {
-                if (trimmed.length() > 0) trimmed.append(',');
+                if (trimmed.length() > 0) trimmed.append(';');
                 trimmed.append(parts[i]);
             }
             next = trimmed.toString();
