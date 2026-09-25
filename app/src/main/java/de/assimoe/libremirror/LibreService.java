@@ -150,9 +150,22 @@ public class LibreService extends Service {
                     .putString("cloud_status", "OFFLINE")
                     .putString("cloud_status_text", "Kein Internet")
                     .apply();
-            saveError("Offline – letzter gespeicherter Wert wird weiter angezeigt.");
+            boolean offlineMode = prefs.getBoolean("offline_mode", true);
+            saveError(
+                    offlineMode
+                            ? "Offline – letzter gespeicherter Wert wird weiter angezeigt."
+                            : "Offline – Offline-Modus ist deaktiviert."
+            );
             nextDelay = calculateBackoff();
-            updateNotificationFromCache("Offline");
+
+            if (offlineMode) {
+                updateNotificationFromCache("Offline");
+            } else {
+                ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(
+                        NOTIFICATION_LIVE,
+                        buildLiveNotification("LibreMirror", "Offline – kein Live-Wert", true)
+                );
+            }
             maybeSystemAlert("Offline", "Keine Internetverbindung", prefs);
             WearSync.pushEmpty(this, "Offline");
         } catch (LibreApiClient.RateLimitException e) {
@@ -182,8 +195,21 @@ public class LibreService extends Service {
                     .putString("cloud_status_text", "Cloud nicht erreichbar")
                     .apply();
             nextDelay = calculateBackoff();
-            saveError("Abbott Cloud derzeit nicht erreichbar – Offline-Modus aktiv.");
-            updateNotificationFromCache("Cloud nicht erreichbar");
+            boolean offlineMode = prefs.getBoolean("offline_mode", true);
+            saveError(
+                    offlineMode
+                            ? "Abbott Cloud derzeit nicht erreichbar – Offline-Modus aktiv."
+                            : "Abbott Cloud derzeit nicht erreichbar."
+            );
+
+            if (offlineMode) {
+                updateNotificationFromCache("Cloud nicht erreichbar");
+            } else {
+                ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(
+                        NOTIFICATION_LIVE,
+                        buildLiveNotification("LibreMirror", "Cloud nicht erreichbar", true)
+                );
+            }
             maybeSystemAlert("Cloud-Ausfall", "LibreMirror nutzt den letzten gespeicherten Wert.", prefs);
             WearSync.pushEmpty(this, "Cloud offline");
         } finally {
