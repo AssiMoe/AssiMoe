@@ -145,7 +145,7 @@ public final class LibreApiClient {
         }
 
         JSONObject payload = new JSONObject();
-        payload.put("isPrimaryMethod", false);
+        payload.put("isPrimaryMethod", true);
 
         JSONObject response = requestJson(
                 "POST",
@@ -177,7 +177,7 @@ public final class LibreApiClient {
 
         JSONObject payload = new JSONObject();
         payload.put("code", code.trim());
-        payload.put("isPrimaryMethod", false);
+        payload.put("isPrimaryMethod", true);
 
         JSONObject response = requestJson(
                 "POST",
