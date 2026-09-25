@@ -31,6 +31,10 @@ public final class SyncStatusResolver {
             return SyncStatus.ABBOTT_UNREACHABLE;
         }
 
+        if (error instanceof java.io.IOException) {
+            return SyncStatus.ABBOTT_UNREACHABLE;
+        }
+
         return SyncStatus.UNKNOWN_ERROR;
     }
 
