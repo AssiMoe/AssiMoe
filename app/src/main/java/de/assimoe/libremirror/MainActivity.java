@@ -140,7 +140,7 @@ public class MainActivity extends Activity {
 
         row.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView version = text("0.3.1", 12, true, BLUE);
+        TextView version = text("0.3.2", 12, true, BLUE);
         version.setGravity(Gravity.CENTER);
         version.setBackground(rounded(0xFFE7F3FF, 18));
         version.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -156,11 +156,11 @@ public class MainActivity extends Activity {
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView overline = text("GLUKOSE (LIBRE CLOUD)", 12, true, 0xFF58759A);
+        TextView overline = text("GLUKOSE (LIBREVIEW REPORT)", 12, true, 0xFF58759A);
         overline.setLetterSpacing(0.08f);
         titleRow.addView(overline, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView source = text("CLOUD", 10, true, BLUE);
+        TextView source = text("REPORT", 10, true, BLUE);
         source.setPadding(dp(10), dp(5), dp(10), dp(5));
         source.setBackground(rounded(0xFFE5F3FF, 15));
         titleRow.addView(source);
@@ -233,7 +233,7 @@ public class MainActivity extends Activity {
         card.addView(sectionHeader(
                 android.R.drawable.ic_menu_upload,
                 "Datenquelle",
-                "Direkt aus deinem eigenen LibreView-Konto.",
+                "Aus deinem eigenen LibreView-Personalkonto.",
                 text("", 1, false, Color.TRANSPARENT)
         ));
 
@@ -248,7 +248,7 @@ public class MainActivity extends Activity {
         card.addView(route, fullTop(12));
 
         TextView note = text(
-                "Keine Juggluco-App und keine LibreLinkUp-App nötig. Die offizielle Libre-App muss den Sensor weiterhin empfangen und die Werte zu LibreView hochladen.",
+                "Keine Juggluco-App und keine LibreLinkUp-App nötig. LibreMirror liest den Daily-Log-Bericht deines persönlichen LibreView-Kontos. Automatische Aktualisierung etwa alle 5 Minuten.",
                 12,
                 false,
                 0xFF607998
@@ -445,7 +445,7 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
 
         startButton = new Button(this);
-        startButton.setText("▶   Libre Cloud starten");
+        startButton.setText("▶   LibreView-Bericht starten");
         startButton.setTextSize(16);
         startButton.setTextColor(Color.WHITE);
         startButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -470,7 +470,7 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(this, LibreService.class);
             intent.setAction(LibreService.ACTION_REFRESH);
             startServiceCompat(intent);
-            toast("Cloud-Aktualisierung angefordert");
+            toast("LibreView-Bericht wird aktualisiert");
         });
         box.addView(refresh, fullHeightTop(56, 10));
 
@@ -508,14 +508,16 @@ public class MainActivity extends Activity {
                     .putString("high", high.getText().toString().trim().isEmpty() ? "180" : high.getText().toString().trim())
                     .putBoolean("car_voice", carVoice.isChecked())
                     .putBoolean("enabled", true)
+                    .putString("last_error", "")
                     .remove("source")
                     .remove("juggluco_last_seen_ms")
                     .remove("juggluco_last_mgdl")
                     .apply();
 
+            stopService(new Intent(this, LibreService.class));
             startServiceCompat(new Intent(this, LibreService.class));
-            startButton.setText("●   Libre Cloud läuft");
-            toast("LibreMirror Cloud-Modus gestartet");
+            startButton.setText("●   LibreView-Bericht läuft");
+            toast("LibreMirror LibreView-Bericht gestartet");
         } catch (Exception e) {
             toast("Speichern fehlgeschlagen: " + e.getMessage());
         }
@@ -562,7 +564,7 @@ public class MainActivity extends Activity {
             trendLabelView.setText(trendLabel(trend));
 
             boolean ok = error.isEmpty();
-            connectionChip.setText(ok ? "●  Libre Cloud verbunden" : "●  Letzter Cloud-Wert");
+            connectionChip.setText(ok ? "●  LibreView verbunden" : "●  Letzter LibreView-Wert");
             connectionChip.setTextColor(ok ? GREEN : 0xFFB57800);
             connectionChip.setBackground(rounded(ok ? 0xFFE6F8EF : 0xFFFFF3D9, 18));
 
@@ -590,7 +592,7 @@ public class MainActivity extends Activity {
         }
 
         chartView.setValues(readHistory(prefs.getString("history_values", "")));
-        startButton.setText(enabled ? "●   Libre Cloud läuft" : "▶   Libre Cloud starten");
+        startButton.setText(enabled ? "●   LibreView-Bericht läuft" : "▶   LibreView-Bericht starten");
     }
 
     private List<Float> readHistory(String raw) {
