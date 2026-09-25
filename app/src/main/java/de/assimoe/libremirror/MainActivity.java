@@ -664,7 +664,7 @@ public class MainActivity extends Activity {
         logout.setTextColor(RED);
         logout.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         logout.setAllCaps(false);
-        logout.setBackground(Color.TRANSPARENT);
+        logout.setBackgroundColor(Color.TRANSPARENT);
         logout.setOnClickListener(v -> confirmLogout());
 
         box.addView(logout, fullHeightTop(48, 8));
