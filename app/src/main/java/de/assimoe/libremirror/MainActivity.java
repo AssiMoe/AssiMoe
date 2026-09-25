@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Locale;
 
 import de.assimoe.libremirror.core.SyncStatus;
+import de.assimoe.libremirror.data.GlucoseRepository;
 
 public class MainActivity extends Activity {
     private static final int BLUE = 0xFF149CFF;
@@ -1073,6 +1074,7 @@ public class MainActivity extends Activity {
         ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancelAll();
 
         boolean keepDark = darkMode;
+        GlucoseRepository.get(this).clearAllAsync();
         SecurePrefs.clearAll(this);
         SecurePrefs.prefs(this).edit().putBoolean("dark_mode", keepDark).apply();
 
