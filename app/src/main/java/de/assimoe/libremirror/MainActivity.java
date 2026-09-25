@@ -1036,6 +1036,85 @@ public class MainActivity extends Activity {
         return card;
     }
 
+    private View buildBackupSettings() {
+        LinearLayout card = card(false);
+
+        card.addView(sectionHeader(
+                android.R.drawable.ic_menu_save,
+                "Lokales Backup",
+                "Einstellungen und lokale Historie sichern oder wiederherstellen."
+        ));
+
+        TextView info = text(
+                "Zugangsdaten und Session-Tokens werden bewusst nicht exportiert.",
+                11,
+                false,
+                textMuted
+        );
+        card.addView(info, fullTop(10));
+
+        Button export = secondaryButton("Backup exportieren");
+        export.setOnClickListener(v -> startBackupExport());
+        card.addView(export, fullHeightTop(48, 12));
+
+        Button restore = secondaryButton("Backup wiederherstellen");
+        restore.setOnClickListener(v -> startBackupImport());
+        card.addView(restore, fullHeightTop(48, 8));
+
+        return card;
+    }
+
+    private View buildUpdateSettings() {
+        LinearLayout card = card(false);
+
+        card.addView(sectionHeader(
+                android.R.drawable.stat_sys_download_done,
+                "Private Updates",
+                "Neue APK erkennen, prüfen und über Android aktualisieren."
+        ));
+
+        updateUrl = field(
+                "HTTPS-URL zum update.json",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI
+        );
+        card.addView(updateUrl, fullTop(12));
+
+        updateStatusView = text(
+                "Updatequelle noch nicht geprüft.",
+                11,
+                false,
+                textMuted
+        );
+        updateStatusView.setLineSpacing(dp(1), 1.08f);
+        card.addView(updateStatusView, fullTop(8));
+
+        Button check = secondaryButton("Nach Update suchen");
+        check.setOnClickListener(v -> checkForPrivateUpdate());
+        card.addView(check, fullHeightTop(48, 10));
+
+        Button source = secondaryButton("APK-Installation erlauben");
+        source.setOnClickListener(v -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startActivity(UpdateManager.unknownSourcesSettings(this));
+            } else {
+                toast("Auf dieser Android-Version nicht erforderlich");
+            }
+        });
+        card.addView(source, fullHeightTop(48, 8));
+
+        TextView format = text(
+                "Manifest: { versionCode, versionName, apkUrl, sha256, notes }. "
+                        + "Android zeigt vor der Installation weiterhin seine Systembestätigung.",
+                10,
+                false,
+                textMuted
+        );
+        format.setLineSpacing(dp(1), 1.08f);
+        card.addView(format, fullTop(9));
+
+        return card;
+    }
+
     private View buildServiceSettings() {
         LinearLayout card = card(false);
 
