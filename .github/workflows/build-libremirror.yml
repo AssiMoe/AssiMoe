@@ -1,9 +1,6 @@
 name: Build LibreMirror APK
 
 on:
-  push:
-    branches:
-      - chatgpt-libremirror-build
   workflow_dispatch:
 
 jobs:
