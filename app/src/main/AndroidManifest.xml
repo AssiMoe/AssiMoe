@@ -6,10 +6,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-        <queries>
-        <package android:name="tk.glucodata" />
-    </queries>
-
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
@@ -17,23 +13,29 @@
         android:roundIcon="@drawable/ic_launcher"
         android:label="LibreMirror"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <activity android:name=".MainActivity" android:exported="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service android:name=".LibreService" android:enabled="true" android:exported="false" android:stopWithTask="false" />
-        <receiver android:name=".BootReceiver" android:enabled="true" android:exported="false">
+
+        <service
+            android:name=".LibreService"
+            android:enabled="true"
+            android:exported="false"
+            android:stopWithTask="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-        </receiver>
-
-        <receiver android:name=".JugglucoReceiver" android:enabled="true" android:exported="true">
-            <intent-filter>
-                <action android:name="glucodata.Minute" />
             </intent-filter>
         </receiver>
     </application>
