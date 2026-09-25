@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
     private EditText password;
     private EditText low;
     private EditText high;
+    private EditText twoFactorCode;
     private Spinner region;
     private Switch carVoice;
 
@@ -61,6 +62,9 @@ public class MainActivity extends Activity {
     private TextView errorView;
     private Button startButton;
     private Button termsButton;
+    private Button verifyTwoFactorButton;
+    private Button resendTwoFactorButton;
+    private LinearLayout twoFactorBox;
     private GlucoseChartView chartView;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -142,7 +146,7 @@ public class MainActivity extends Activity {
 
         row.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView version = text("0.3.7", 12, true, BLUE);
+        TextView version = text("0.4.0", 12, true, BLUE);
         version.setGravity(Gravity.CENTER);
         version.setBackground(rounded(0xFFE7F3FF, 18));
         version.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -236,6 +240,51 @@ public class MainActivity extends Activity {
         termsButton.setVisibility(View.GONE);
         termsButton.setOnClickListener(v -> confirmTermsAcceptance());
         card.addView(termsButton, fullHeightTop(52, 10));
+
+        twoFactorBox = new LinearLayout(this);
+        twoFactorBox.setOrientation(LinearLayout.VERTICAL);
+        twoFactorBox.setPadding(dp(14), dp(14), dp(14), dp(14));
+        twoFactorBox.setBackground(roundedWithStroke(0xFFF3F9FF, 0xFF9CCCF6, 18));
+        twoFactorBox.setVisibility(View.GONE);
+
+        TextView twoFaTitle = text("LibreView Zwei-Faktor-Bestätigung", 15, true, 0xFF0B1D3D);
+        twoFactorBox.addView(twoFaTitle);
+
+        TextView twoFaText = text(
+                "Abbott hat einen Bestätigungscode per E-Mail gesendet. Gib den Code hier ein.",
+                12,
+                false,
+                0xFF607998
+        );
+        twoFaText.setLineSpacing(dp(1), 1.08f);
+        twoFactorBox.addView(twoFaText, wrapTop(4));
+
+        twoFactorCode = field("Bestätigungscode", InputType.TYPE_CLASS_NUMBER);
+        twoFactorCode.setTextSize(22);
+        twoFactorCode.setGravity(Gravity.CENTER);
+        twoFactorBox.addView(twoFactorCode, fullTop(10));
+
+        verifyTwoFactorButton = new Button(this);
+        verifyTwoFactorButton.setText("Code bestätigen");
+        verifyTwoFactorButton.setTextSize(14);
+        verifyTwoFactorButton.setTextColor(Color.WHITE);
+        verifyTwoFactorButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        verifyTwoFactorButton.setAllCaps(false);
+        verifyTwoFactorButton.setBackground(gradientButton());
+        verifyTwoFactorButton.setOnClickListener(v -> verifyTwoFactor());
+        twoFactorBox.addView(verifyTwoFactorButton, fullHeightTop(52, 10));
+
+        resendTwoFactorButton = new Button(this);
+        resendTwoFactorButton.setText("Neuen Code senden");
+        resendTwoFactorButton.setTextSize(13);
+        resendTwoFactorButton.setTextColor(BLUE);
+        resendTwoFactorButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        resendTwoFactorButton.setAllCaps(false);
+        resendTwoFactorButton.setBackground(roundedWithStroke(Color.TRANSPARENT, 0xFF84BEF5, 16));
+        resendTwoFactorButton.setOnClickListener(v -> resendTwoFactor());
+        twoFactorBox.addView(resendTwoFactorButton, fullHeightTop(48, 8));
+
+        card.addView(twoFactorBox, fullTop(10));
 
         return card;
     }
@@ -531,6 +580,34 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private void verifyTwoFactor() {
+        String code = twoFactorCode == null ? "" : twoFactorCode.getText().toString().trim();
+
+        if (code.isEmpty()) {
+            toast("Bitte den Bestätigungscode eingeben");
+            return;
+        }
+
+        Intent intent = new Intent(this, LibreService.class);
+        intent.setAction(LibreService.ACTION_VERIFY_2FA);
+        intent.putExtra(LibreService.EXTRA_2FA_CODE, code);
+        startServiceCompat(intent);
+
+        verifyTwoFactorButton.setEnabled(false);
+        verifyTwoFactorButton.setText("Code wird geprüft …");
+        toast("LibreView-Code wird geprüft");
+    }
+
+    private void resendTwoFactor() {
+        if (twoFactorCode != null) twoFactorCode.setText("");
+
+        Intent intent = new Intent(this, LibreService.class);
+        intent.setAction(LibreService.ACTION_RESEND_2FA);
+        startServiceCompat(intent);
+
+        toast("Neuer LibreView-Code wird angefordert");
+    }
+
     private void saveAndStart() {
         String mail = email.getText().toString().trim();
         String pass = password.getText().toString();
@@ -550,12 +627,17 @@ public class MainActivity extends Activity {
                     .putString("high", high.getText().toString().trim().isEmpty() ? "180" : high.getText().toString().trim())
                     .putBoolean("car_voice", carVoice.isChecked())
                     .putBoolean("enabled", true)
+                    .putBoolean("two_factor_required", false)
+                    .putBoolean("terms_required", false)
+                    .remove("terms_step")
+                    .remove("pending_2fa_base_url")
                     .putString("last_error", "")
                     .remove("source")
                     .remove("juggluco_last_seen_ms")
                     .remove("juggluco_last_mgdl")
                     .apply();
 
+            SecurePrefs.putSecret(this, "pending_2fa_token", "");
             stopService(new Intent(this, LibreService.class));
             startServiceCompat(new Intent(this, LibreService.class));
             startButton.setText("●   LibreView-Bericht läuft");
@@ -599,6 +681,7 @@ public class MainActivity extends Activity {
         String error = prefs.getString("last_error", "");
         boolean enabled = prefs.getBoolean("enabled", false);
         boolean termsRequired = prefs.getBoolean("terms_required", false);
+        boolean twoFactorRequired = prefs.getBoolean("two_factor_required", false);
         String termsStep = prefs.getString("terms_step", "tou");
 
         if (!value.isEmpty()) {
@@ -635,7 +718,7 @@ public class MainActivity extends Activity {
             errorView.setText(error);
         }
 
-        if (termsRequired) {
+        if (termsRequired && !twoFactorRequired) {
             termsButton.setText(
                     "pp".equals(termsStep)
                             ? "LibreView-Datenschutz bestätigen"
@@ -644,6 +727,18 @@ public class MainActivity extends Activity {
             termsButton.setVisibility(View.VISIBLE);
         } else {
             termsButton.setVisibility(View.GONE);
+        }
+
+        if (twoFactorRequired) {
+            twoFactorBox.setVisibility(View.VISIBLE);
+            verifyTwoFactorButton.setEnabled(true);
+            verifyTwoFactorButton.setText("Code bestätigen");
+            connectionChip.setText("●  2FA erforderlich");
+            connectionChip.setTextColor(0xFFB57800);
+            connectionChip.setBackground(rounded(0xFFFFF3D9, 18));
+        } else {
+            twoFactorBox.setVisibility(View.GONE);
+            if (twoFactorCode != null) twoFactorCode.setText("");
         }
 
         chartView.setValues(readHistory(prefs.getString("history_values", "")));
