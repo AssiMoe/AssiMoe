@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
 
         row.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView version = text("0.3.3", 12, true, BLUE);
+        TextView version = text("0.3.4", 12, true, BLUE);
         version.setGravity(Gravity.CENTER);
         version.setBackground(rounded(0xFFE7F3FF, 18));
         version.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -503,19 +503,30 @@ public class MainActivity extends Activity {
     }
 
     private void confirmTermsAcceptance() {
+        String step = SecurePrefs.prefs(this).getString("terms_step", "tou");
+        boolean privacy = "pp".equals(step);
+
+        String title = privacy
+                ? "LibreView-Datenschutzbestätigung"
+                : "LibreView-Nutzungsbedingungen";
+
+        String message = privacy
+                ? "LibreView verlangt eine Datenschutz-/Privacy-Policy-Bestätigung. " +
+                  "Wenn du fortfährst, sendet LibreMirror genau diesen von LibreView angeforderten Schritt. " +
+                  "Fahre nur fort, wenn du diese Bestätigung abgeben möchtest."
+                : "LibreView verlangt die Bestätigung aktualisierter Nutzungsbedingungen. " +
+                  "Wenn du fortfährst, sendet LibreMirror genau diesen von LibreView angeforderten Schritt. " +
+                  "Fahre nur fort, wenn du die Bedingungen akzeptieren möchtest.";
+
         new AlertDialog.Builder(this)
-                .setTitle("LibreView-Nutzungsbedingungen")
-                .setMessage(
-                        "LibreView verlangt die Bestätigung aktualisierter Nutzungsbedingungen. " +
-                        "Wenn du fortfährst, sendet LibreMirror die Bestätigung an LibreView. " +
-                        "Bestätige nur, wenn du die Bedingungen akzeptieren möchtest."
-                )
+                .setTitle(title)
+                .setMessage(message)
                 .setNegativeButton("Abbrechen", null)
-                .setPositiveButton("Akzeptieren", (dialog, which) -> {
+                .setPositiveButton("Bestätigen", (dialog, which) -> {
                     Intent intent = new Intent(this, LibreService.class);
                     intent.setAction(LibreService.ACTION_ACCEPT_TERMS);
                     startServiceCompat(intent);
-                    toast("Bestätigung wird an LibreView gesendet");
+                    toast("LibreView-Kontoschritt wird bestätigt");
                 })
                 .show();
     }
@@ -588,6 +599,7 @@ public class MainActivity extends Activity {
         String error = prefs.getString("last_error", "");
         boolean enabled = prefs.getBoolean("enabled", false);
         boolean termsRequired = prefs.getBoolean("terms_required", false);
+        String termsStep = prefs.getString("terms_step", "tou");
 
         if (!value.isEmpty()) {
             valueView.setText(value);
@@ -623,7 +635,16 @@ public class MainActivity extends Activity {
             errorView.setText(error);
         }
 
-        termsButton.setVisibility(termsRequired ? View.VISIBLE : View.GONE);
+        if (termsRequired) {
+            termsButton.setText(
+                    "pp".equals(termsStep)
+                            ? "LibreView-Datenschutz bestätigen"
+                            : "LibreView-Bedingungen bestätigen"
+            );
+            termsButton.setVisibility(View.VISIBLE);
+        } else {
+            termsButton.setVisibility(View.GONE);
+        }
 
         chartView.setValues(readHistory(prefs.getString("history_values", "")));
         startButton.setText(enabled ? "●   LibreView-Bericht läuft" : "▶   LibreView-Bericht starten");
