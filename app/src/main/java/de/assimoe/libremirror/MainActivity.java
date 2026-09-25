@@ -9,6 +9,7 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
@@ -61,26 +62,43 @@ public class MainActivity extends Activity {
     private FrameLayout pageContainer;
     private View nowPage;
     private View historyPage;
+    private View statsPage;
     private View settingsPage;
 
     private LinearLayout navNow;
     private LinearLayout navHistory;
+    private LinearLayout navStats;
     private LinearLayout navSettings;
     private ImageView navNowIcon;
     private ImageView navHistoryIcon;
+    private ImageView navStatsIcon;
     private ImageView navSettingsIcon;
     private TextView navNowText;
     private TextView navHistoryText;
+    private TextView navStatsText;
     private TextView navSettingsText;
 
     private EditText email;
     private EditText password;
     private EditText low;
     private EditText high;
+    private EditText criticalLow;
+    private EditText quietStart;
+    private EditText quietEnd;
+    private EditText alertRepeat;
+    private EditText staleMinutes;
+    private EditText updateUrl;
     private Spinner region;
     private Spinner syncInterval;
     private Switch carVoice;
     private Switch darkModeSwitch;
+    private Switch adaptiveSync;
+    private Switch trendAlerts;
+    private Switch staleAlerts;
+    private Switch cloudAlerts;
+    private Switch quietHours;
+    private Switch autoMode;
+    private Switch privateMode;
 
     private TextView valueView;
     private TextView unitView;
@@ -97,11 +115,22 @@ public class MainActivity extends Activity {
     private TextView historyTrendView;
     private TextView historyRangeView;
 
+    private TextView statsTodayView;
+    private TextView statsYesterdayView;
+    private TextView statsComparisonView;
+    private TextView statsWeekView;
+    private TextView batteryDashboardView;
+    private TextView cloudStatusView;
+    private TextView updateStatusView;
+
     private Button startButton;
     private Button refreshButton;
 
     private GlucoseChartView compactChart;
     private FullGlucoseChartView fullChart;
+
+    private static final int REQ_EXPORT_BACKUP = 601;
+    private static final int REQ_IMPORT_BACKUP = 602;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
