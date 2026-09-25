@@ -129,4 +129,12 @@ public class AutoModeActivity extends Activity {
         handler.removeCallbacks(update);
         super.onPause();
     }
+
+    @Override
+    protected void onDestroy() {
+        SecurePrefs.prefs(this).edit()
+                .putBoolean("auto_mode_manual", false)
+                .apply();
+        super.onDestroy();
+    }
 }
