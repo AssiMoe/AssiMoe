@@ -2,6 +2,7 @@ package de.assimoe.libremirror;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -59,6 +60,7 @@ public class MainActivity extends Activity {
     private TextView updatedView;
     private TextView errorView;
     private Button startButton;
+    private Button termsButton;
     private GlucoseChartView chartView;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -140,7 +142,7 @@ public class MainActivity extends Activity {
 
         row.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView version = text("0.3.2", 12, true, BLUE);
+        TextView version = text("0.3.3", 12, true, BLUE);
         version.setGravity(Gravity.CENTER);
         version.setBackground(rounded(0xFFE7F3FF, 18));
         version.setPadding(dp(10), dp(6), dp(10), dp(6));
@@ -223,6 +225,17 @@ public class MainActivity extends Activity {
         errorView = text("", 12, false, RED);
         errorView.setVisibility(View.GONE);
         card.addView(errorView, wrapTop(5));
+
+        termsButton = new Button(this);
+        termsButton.setText("LibreView-Bedingungen bestätigen");
+        termsButton.setTextSize(14);
+        termsButton.setTextColor(Color.WHITE);
+        termsButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        termsButton.setAllCaps(false);
+        termsButton.setBackground(gradientButton());
+        termsButton.setVisibility(View.GONE);
+        termsButton.setOnClickListener(v -> confirmTermsAcceptance());
+        card.addView(termsButton, fullHeightTop(52, 10));
 
         return card;
     }
@@ -489,6 +502,24 @@ public class MainActivity extends Activity {
         return box;
     }
 
+    private void confirmTermsAcceptance() {
+        new AlertDialog.Builder(this)
+                .setTitle("LibreView-Nutzungsbedingungen")
+                .setMessage(
+                        "LibreView verlangt die Bestätigung aktualisierter Nutzungsbedingungen. " +
+                        "Wenn du fortfährst, sendet LibreMirror die Bestätigung an LibreView. " +
+                        "Bestätige nur, wenn du die Bedingungen akzeptieren möchtest."
+                )
+                .setNegativeButton("Abbrechen", null)
+                .setPositiveButton("Akzeptieren", (dialog, which) -> {
+                    Intent intent = new Intent(this, LibreService.class);
+                    intent.setAction(LibreService.ACTION_ACCEPT_TERMS);
+                    startServiceCompat(intent);
+                    toast("Bestätigung wird an LibreView gesendet");
+                })
+                .show();
+    }
+
     private void saveAndStart() {
         String mail = email.getText().toString().trim();
         String pass = password.getText().toString();
@@ -556,6 +587,7 @@ public class MainActivity extends Activity {
         long fetch = prefs.getLong("last_fetch_ms", 0);
         String error = prefs.getString("last_error", "");
         boolean enabled = prefs.getBoolean("enabled", false);
+        boolean termsRequired = prefs.getBoolean("terms_required", false);
 
         if (!value.isEmpty()) {
             valueView.setText(value);
@@ -590,6 +622,8 @@ public class MainActivity extends Activity {
             errorView.setVisibility(View.VISIBLE);
             errorView.setText(error);
         }
+
+        termsButton.setVisibility(termsRequired ? View.VISIBLE : View.GONE);
 
         chartView.setValues(readHistory(prefs.getString("history_values", "")));
         startButton.setText(enabled ? "●   LibreView-Bericht läuft" : "▶   LibreView-Bericht starten");
