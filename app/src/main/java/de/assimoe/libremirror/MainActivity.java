@@ -522,6 +522,7 @@ public class MainActivity extends Activity {
         root.addView(buildAlertSettings(), fullTop(14));
         root.addView(buildAppearanceSettings(), fullTop(14));
         root.addView(buildWidgetSettings(), fullTop(14));
+        root.addView(buildBatteryDashboard(), fullTop(14));
         root.addView(buildServiceSettings(), fullTop(14));
 
         TextView footer = text(
@@ -792,6 +793,84 @@ public class MainActivity extends Activity {
         card.addView(lockStarHint, fullTop(10));
 
         return card;
+    }
+
+    private View buildBatteryDashboard() {
+        LinearLayout card = card(false);
+
+        card.addView(sectionHeader(
+                R.drawable.ic_live,
+                "Akku & Synchronisierung",
+                "Adaptive Aktualisierung und reale Aktivitätswerte."
+        ));
+
+        adaptiveSyncSwitch = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_live,
+                        "Adaptive Aktualisierung",
+                        "Bei geöffneter App, Grenzwertstatus oder starkem Trend temporär häufiger synchronisieren.",
+                        adaptiveSyncSwitch
+                ),
+                fullTop(12)
+        );
+
+        metricSyncsView = metricRow(card, "Syncs seit Mitternacht", "—");
+        metricApiView = metricRow(card, "API-Requests seit Mitternacht", "—");
+        metricWakeupsView = metricRow(card, "Wakeups seit Mitternacht", "—");
+        metricFailuresView = metricRow(card, "Fehler / Retries", "—");
+        metricDurationView = metricRow(card, "Letzte Sync-Dauer", "—");
+        metricNextSyncView = metricRow(card, "Nächster Sync", "—");
+        metricReasonView = metricRow(card, "Aktiver Sync-Grund", "—");
+        batteryOptimizationView = metricRow(card, "Android Akkuoptimierung", "—");
+
+        Button batterySettings = secondaryButton("Android Akku-Einstellungen öffnen");
+        batterySettings.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Exception e) {
+                toast("Akku-Einstellungen konnten nicht geöffnet werden");
+            }
+        });
+        card.addView(batterySettings, fullHeightTop(50, 12));
+
+        TextView hint = text(
+                "LibreMirror zeigt hier keine erfundenen Akku-Prozentwerte. Die Werte basieren auf tatsächlichen Syncs, HTTP-Anfragen und Wakeups.",
+                11,
+                false,
+                textMuted
+        );
+        hint.setLineSpacing(dp(1), 1.08f);
+        card.addView(hint, fullTop(10));
+
+        return card;
+    }
+
+    private TextView metricRow(
+            LinearLayout parent,
+            String label,
+            String initialValue
+    ) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView left = text(label, 12, false, textSecondary);
+        row.addView(
+                left,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
+        TextView right = text(initialValue, 12, true, textPrimary);
+        right.setGravity(Gravity.END);
+        row.addView(right);
+
+        parent.addView(row, fullTop(8));
+        return right;
     }
 
     private View buildServiceSettings() {
