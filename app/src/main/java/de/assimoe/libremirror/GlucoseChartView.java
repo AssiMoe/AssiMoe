@@ -17,6 +17,7 @@ public class GlucoseChartView extends View {
     private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final List<Float> values = new ArrayList<>();
+    private boolean darkMode = true;
 
     public GlucoseChartView(Context context) {
         super(context);
@@ -40,6 +41,13 @@ public class GlucoseChartView extends View {
         gridPaint.setColor(0x1A3A7BD5);
 
         fillPaint.setStyle(Paint.Style.FILL);
+    }
+
+    public void setDarkMode(boolean darkMode) {
+        this.darkMode = darkMode;
+        linePaint.setColor(darkMode ? 0xFF22B6FF : 0xFF149CFF);
+        gridPaint.setColor(darkMode ? 0x263B5A73 : 0x1A3A7BD5);
+        invalidate();
     }
 
     public void setValues(List<Float> newValues) {
@@ -106,8 +114,8 @@ public class GlucoseChartView extends View {
 
         fillPaint.setShader(new LinearGradient(
                 0, 0, 0, h,
-                0x4039A9FF,
-                0x0039A9FF,
+                darkMode ? 0x4022B6FF : 0x40149CFF,
+                darkMode ? 0x0022B6FF : 0x00149CFF,
                 Shader.TileMode.CLAMP
         ));
 
