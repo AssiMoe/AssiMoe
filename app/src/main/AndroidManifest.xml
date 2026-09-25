@@ -30,15 +30,68 @@
             android:stopWithTask="false" />
 
         <receiver
+            android:name=".LibreMirrorMiniWidgetProvider"
+            android:enabled="true"
+            android:exported="false"
+            android:label="LibreMirror Mini">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/libremirror_widget_mini_info" />
+        </receiver>
+
+        <receiver
+            android:name=".LibreMirrorCleanWidgetProvider"
+            android:enabled="true"
+            android:exported="false"
+            android:label="LibreMirror Clean">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/libremirror_widget_clean_info" />
+        </receiver>
+
+        <receiver
             android:name=".LibreMirrorWidgetProvider"
             android:enabled="true"
-            android:exported="false">
+            android:exported="false"
+            android:label="LibreMirror Compact">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/libremirror_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".LibreMirrorLargeWidgetProvider"
+            android:enabled="true"
+            android:exported="false"
+            android:label="LibreMirror Large">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/libremirror_widget_large_info" />
+        </receiver>
+
+        <receiver
+            android:name=".LibreMirrorAlertWidgetProvider"
+            android:enabled="true"
+            android:exported="false"
+            android:label="LibreMirror Alert">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/libremirror_widget_alert_info" />
         </receiver>
 
         <receiver
