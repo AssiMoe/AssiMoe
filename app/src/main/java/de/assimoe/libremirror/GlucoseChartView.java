@@ -63,15 +63,7 @@ public class GlucoseChartView extends View {
 
         List<Float> data = values;
         if (data.size() < 2) {
-            data = new ArrayList<>();
-            data.add(104f);
-            data.add(109f);
-            data.add(103f);
-            data.add(116f);
-            data.add(111f);
-            data.add(119f);
-            data.add(113f);
-            data.add(122f);
+            return;
         }
 
         float min = Float.MAX_VALUE;
