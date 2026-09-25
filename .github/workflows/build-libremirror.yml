@@ -1,9 +1,9 @@
-name: Build LibreMirror 2.0 Phase 1
+name: Build LibreMirror 2.0 Phase 2
 
 on:
   push:
     branches:
-      - libremirror-v2-phase1
+      - libremirror-v2-phase2
   workflow_dispatch:
 
 jobs:
@@ -30,10 +30,10 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Lint phase 1
+      - name: Lint phase 2
         run: gradle --no-daemon :app:lintRelease
 
-      - name: Build phase 1 APK
+      - name: Build phase 2 APK
         run: gradle --no-daemon :app:assembleRelease
 
       - name: Verify APK signature
@@ -42,6 +42,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LibreMirror-2.0.0-alpha1-phase1
+          name: LibreMirror-2.0.0-alpha2-phase2
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
