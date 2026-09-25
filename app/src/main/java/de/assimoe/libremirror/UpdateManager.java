@@ -30,6 +30,10 @@ public final class UpdateManager {
             return new Result(false, currentVersionCode, "", "", "", "Keine Update-URL konfiguriert.");
         }
 
+        if (!manifestUrl.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+            throw new Exception("Update-URL muss HTTPS verwenden.");
+        }
+
         HttpURLConnection connection = (HttpURLConnection) new URL(manifestUrl.trim()).openConnection();
         connection.setConnectTimeout(12000);
         connection.setReadTimeout(15000);
@@ -72,6 +76,10 @@ public final class UpdateManager {
     public static File download(Context context, Result result) throws Exception {
         if (result == null || result.apkUrl.isEmpty()) {
             throw new Exception("Keine APK-URL vorhanden.");
+        }
+
+        if (!result.apkUrl.toLowerCase(Locale.ROOT).startsWith("https://")) {
+            throw new Exception("APK-URL muss HTTPS verwenden.");
         }
 
         File dir = new File(context.getCacheDir(), "updates");
