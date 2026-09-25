@@ -25,6 +25,7 @@ public final class LibreApiClient {
     private String authToken;
     private String userId;
     private long tokenExpiresAt;
+    private String twoFactorMode = "BOOL_TRUE";
 
     public LibreApiClient(String region) {
         configuredRegion = region == null ? "AUTO" : region.trim().toUpperCase(Locale.ROOT);
@@ -139,32 +140,57 @@ public final class LibreApiClient {
         }
     }
 
-    public void sendTwoFactorCode() throws Exception {
+    public String sendTwoFactorCode() throws Exception {
         if (authToken == null || authToken.isEmpty()) {
             throw new Exception("LibreView-2FA kann ohne temporären Login-Token nicht gestartet werden.");
         }
 
-        JSONObject payload = new JSONObject();
-        payload.put("isPrimaryMethod", true);
+        String[] modes = new String[]{
+                "STRING_TRUE",
+                "STRING_FALSE",
+                "BOOL_TRUE",
+                "BOOL_FALSE"
+        };
 
-        JSONObject response = requestJson(
-                "POST",
-                baseUrl + "/auth/continue/2fa/sendcode",
-                payload,
-                true
+        Exception lastError = null;
+
+        for (String mode : modes) {
+            try {
+                JSONObject payload = new JSONObject();
+                putPrimaryMethod(payload, mode);
+
+                JSONObject response = requestJson(
+                        "POST",
+                        baseUrl + "/auth/continue/2fa/sendcode",
+                        payload,
+                        true
+                );
+
+                JSONObject ticket = response.optJSONObject("ticket");
+                if (ticket == null) {
+                    JSONObject data = response.optJSONObject("data");
+                    if (data != null) ticket = data.optJSONObject("authTicket");
+                }
+
+                applyAuthTicket(ticket);
+
+                if (authToken == null || authToken.isEmpty()) {
+                    throw new Exception("LibreView hat nach dem Versand des 2FA-Codes keinen temporären Token geliefert.");
+                }
+
+                twoFactorMode = mode;
+                return mode;
+            } catch (Exception e) {
+                lastError = e;
+            }
+        }
+
+        throw new Exception(
+                "LibreView hat alle bekannten 2FA-Codevarianten abgelehnt."
+                        + (lastError == null || lastError.getMessage() == null
+                        ? ""
+                        : " Letzte Antwort: " + lastError.getMessage())
         );
-
-        JSONObject ticket = response.optJSONObject("ticket");
-        if (ticket == null) {
-            JSONObject data = response.optJSONObject("data");
-            if (data != null) ticket = data.optJSONObject("authTicket");
-        }
-
-        applyAuthTicket(ticket);
-
-        if (authToken == null || authToken.isEmpty()) {
-            throw new Exception("LibreView hat nach dem Versand des 2FA-Codes keinen temporären Token geliefert.");
-        }
     }
 
     public Reading verifyTwoFactorAndFetch(String code) throws Exception {
@@ -177,7 +203,7 @@ public final class LibreApiClient {
 
         JSONObject payload = new JSONObject();
         payload.put("code", code.trim());
-        payload.put("isPrimaryMethod", true);
+        putPrimaryMethod(payload, twoFactorMode);
 
         JSONObject response = requestJson(
                 "POST",
@@ -204,13 +230,38 @@ public final class LibreApiClient {
         return fetchFromDailyLogReport();
     }
 
-    public void restoreTwoFactorSession(String token, String restoredBaseUrl) {
+    public void restoreTwoFactorSession(String token, String restoredBaseUrl, String restoredMode) {
         if (token != null && !token.isEmpty()) {
             authToken = token;
             tokenExpiresAt = System.currentTimeMillis() + (15L * 60L * 1000L);
         }
         if (restoredBaseUrl != null && !restoredBaseUrl.isEmpty()) {
             baseUrl = restoredBaseUrl;
+        }
+        if (restoredMode != null && !restoredMode.isEmpty()) {
+            twoFactorMode = restoredMode;
+        }
+    }
+
+    public String getTwoFactorMode() {
+        return twoFactorMode;
+    }
+
+    private void putPrimaryMethod(JSONObject payload, String mode) throws Exception {
+        switch (mode) {
+            case "STRING_TRUE":
+                payload.put("isPrimaryMethod", "true");
+                break;
+            case "STRING_FALSE":
+                payload.put("isPrimaryMethod", "false");
+                break;
+            case "BOOL_FALSE":
+                payload.put("isPrimaryMethod", false);
+                break;
+            case "BOOL_TRUE":
+            default:
+                payload.put("isPrimaryMethod", true);
+                break;
         }
     }
 
