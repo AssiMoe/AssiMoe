@@ -88,6 +88,7 @@ public class LibreService extends Service {
                     .putLong("last_fetch_ms", System.currentTimeMillis())
                     .putString("last_error", "")
                     .putBoolean("terms_required", false)
+                    .remove("terms_step")
                     .apply();
 
             if (!reading.timestamp.equals(previousSensorTime)) {
@@ -99,6 +100,7 @@ public class LibreService extends Service {
         } catch (LibreApiClient.TermsRequiredException e) {
             SecurePrefs.prefs(this).edit()
                     .putBoolean("terms_required", true)
+                    .putString("terms_step", e.getStepType())
                     .putString("last_error", e.getMessage())
                     .putLong("last_error_ms", System.currentTimeMillis())
                     .apply();
@@ -132,6 +134,7 @@ public class LibreService extends Service {
 
             p.edit()
                     .putBoolean("terms_required", false)
+                    .remove("terms_step")
                     .putString("last_value", reading.displayValue())
                     .putString("last_unit", reading.unit)
                     .putInt("last_trend", reading.trend)
@@ -144,6 +147,14 @@ public class LibreService extends Service {
             showGlucoseNotification(reading);
             checkAlert(reading, p);
             updateService("LibreView-Bedingungen bestätigt");
+        } catch (LibreApiClient.TermsRequiredException e) {
+            SecurePrefs.prefs(this).edit()
+                    .putBoolean("terms_required", true)
+                    .putString("terms_step", e.getStepType())
+                    .putString("last_error", e.getMessage())
+                    .putLong("last_error_ms", System.currentTimeMillis())
+                    .apply();
+            updateService("Weiterer LibreView-Kontoschritt erforderlich");
         } catch (Exception e) {
             saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             updateService("Bestätigung fehlgeschlagen");
