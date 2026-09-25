@@ -974,7 +974,8 @@ public class MainActivity extends Activity {
 
         navNow = navItem(R.drawable.ic_nav_now, "Jetzt", 0);
         navHistory = navItem(R.drawable.ic_nav_history, "Verlauf", 1);
-        navSettings = navItem(R.drawable.ic_nav_settings, "Einstellungen", 2);
+        navStats = navItem(R.drawable.ic_nav_stats, "Statistik", 2);
+        navSettings = navItem(R.drawable.ic_nav_settings, "Einstellungen", 3);
 
         navNowIcon = (ImageView) navNow.getChildAt(0);
         navNowText = (TextView) navNow.getChildAt(1);
@@ -982,11 +983,15 @@ public class MainActivity extends Activity {
         navHistoryIcon = (ImageView) navHistory.getChildAt(0);
         navHistoryText = (TextView) navHistory.getChildAt(1);
 
+        navStatsIcon = (ImageView) navStats.getChildAt(0);
+        navStatsText = (TextView) navStats.getChildAt(1);
+
         navSettingsIcon = (ImageView) navSettings.getChildAt(0);
         navSettingsText = (TextView) navSettings.getChildAt(1);
 
         nav.addView(navNow, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
         nav.addView(navHistory, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        nav.addView(navStats, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
         nav.addView(navSettings, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
 
         return nav;
@@ -1014,11 +1019,13 @@ public class MainActivity extends Activity {
     private void showPage(int page) {
         nowPage.setVisibility(page == 0 ? View.VISIBLE : View.GONE);
         historyPage.setVisibility(page == 1 ? View.VISIBLE : View.GONE);
-        settingsPage.setVisibility(page == 2 ? View.VISIBLE : View.GONE);
+        statsPage.setVisibility(page == 2 ? View.VISIBLE : View.GONE);
+        settingsPage.setVisibility(page == 3 ? View.VISIBLE : View.GONE);
 
         tintNav(navNowIcon, navNowText, page == 0);
         tintNav(navHistoryIcon, navHistoryText, page == 1);
-        tintNav(navSettingsIcon, navSettingsText, page == 2);
+        tintNav(navStatsIcon, navStatsText, page == 2);
+        tintNav(navSettingsIcon, navSettingsText, page == 3);
     }
 
     private void tintNav(ImageView icon, TextView label, boolean active) {
