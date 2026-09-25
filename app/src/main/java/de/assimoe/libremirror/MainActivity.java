@@ -1685,6 +1685,15 @@ public class MainActivity extends Activity {
         String patient = prefs.getString("patient_name", "");
         String error = prefs.getString("last_error", "");
         boolean enabled = prefs.getBoolean("enabled", false);
+        boolean offlineEnabled = prefs.getBoolean("offline_mode", true);
+        String cloudCode = prefs.getString("cloud_status", "");
+        boolean cloudUnavailable = !cloudCode.isEmpty() && !"ONLINE".equals(cloudCode);
+
+        if (!offlineEnabled && cloudUnavailable) {
+            value = "";
+            trend = 0;
+            sensorMs = 0L;
+        }
 
         double lowValue = parseDouble(prefs.getString("low", "70"), 70.0);
         double highValue = parseDouble(prefs.getString("high", "180"), 180.0);
