@@ -11,16 +11,18 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 public final class LibreApiClient {
-    private static final String VERSION = "4.17.0";
-
     private final String configuredRegion;
     private String baseUrl;
-    private String userToken;
-    private String accountId;
-    private String country = "DE";
+    private String authToken;
+    private String userId;
+    private long tokenExpiresAt;
 
     public LibreApiClient(String region) {
         configuredRegion = region == null ? "AUTO" : region.trim().toUpperCase(Locale.ROOT);
@@ -28,200 +30,419 @@ public final class LibreApiClient {
     }
 
     public Reading fetch(String email, String password) throws Exception {
-        if (userToken == null || accountId == null) {
-            loginDirect(email, password);
+        if (authToken == null || userId == null || System.currentTimeMillis() >= tokenExpiresAt) {
+            login(email, password);
         }
 
         try {
-            return fetchDirectMeasurements();
+            return fetchFromDailyLogReport();
         } catch (AuthException e) {
-            userToken = null;
-            accountId = null;
-            loginDirect(email, password);
-            return fetchDirectMeasurements();
+            authToken = null;
+            userId = null;
+            tokenExpiresAt = 0;
+            login(email, password);
+            return fetchFromDailyLogReport();
         }
     }
 
-    private void loginDirect(String email, String password) throws Exception {
-        if ("AUTO".equals(configuredRegion)) {
-            discoverRegion(email, password);
-        }
+    private void login(String email, String password) throws Exception {
+        baseUrl = hostFor(configuredRegion);
 
-        JSONObject payload = new JSONObject();
-        payload.put("Domain", "Libreview");
-        payload.put("GatewayType", "LinkUp.Android");
-        payload.put("Password", password);
-        payload.put("UserName", email);
-
-        JSONObject response = legacyRequest(
-                "POST",
-                baseUrl + "/lsl/api/nisperson/getauthenticateduser",
-                payload,
-                false
-        );
-
-        if (response.optInt("status", -1) != 0) {
-            throw new Exception("LibreView-Login fehlgeschlagen (Status "
-                    + response.optInt("status", -1) + ").");
-        }
-
-        JSONObject result = response.optJSONObject("result");
-        if (result == null) {
-            throw new Exception("LibreView hat keine Kontodaten geliefert.");
-        }
-
-        userToken = result.optString("UserToken", "");
-        accountId = result.optString("AccountId", "");
-        country = result.optString("Country", "DE");
-
-        if (userToken.isEmpty() || accountId.isEmpty()) {
-            throw new Exception("LibreView-Login unvollständig: UserToken oder Account-ID fehlt.");
-        }
-    }
-
-    private void discoverRegion(String email, String password) throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("email", email);
         payload.put("password", password);
 
-        JSONObject response;
-        try {
-            response = modernRequest("POST", "https://api.libreview.io/auth/login", payload);
-        } catch (Exception e) {
-            baseUrl = "https://api-de.libreview.io";
-            return;
-        }
+        JSONObject response = requestJson("POST", baseUrl + "/auth/login", payload, false);
 
         JSONObject data = response.optJSONObject("data");
+        if (data != null && data.optBoolean("redirect", false)) {
+            String region = data.optString("region", "");
+            if (region.isEmpty()) {
+                throw new Exception("LibreView verlangt eine Regionsumleitung, liefert aber keine Region.");
+            }
+
+            baseUrl = hostFor(region.toUpperCase(Locale.ROOT));
+            response = requestJson("POST", baseUrl + "/auth/login", payload, false);
+            data = response.optJSONObject("data");
+        }
+
         if (data == null) {
-            baseUrl = "https://api-de.libreview.io";
+            throw new Exception(apiMessage(response, "LibreView-Login fehlgeschlagen."));
+        }
+
+        if (data.has("step") && !data.isNull("step")) {
+            throw new Exception(
+                    "LibreView verlangt einen zusätzlichen Anmeldeschritt (z. B. 2FA oder Bestätigung). "
+                            + "Bitte einmal im Browser bei LibreView anmelden und offene Bestätigungen abschließen."
+            );
+        }
+
+        JSONObject ticket = data.optJSONObject("authTicket");
+        JSONObject user = data.optJSONObject("user");
+
+        if (ticket == null) {
+            throw new Exception(apiMessage(response, "LibreView hat kein Auth-Ticket geliefert."));
+        }
+
+        applyAuthTicket(ticket);
+
+        if (user == null || user.optString("id", "").isEmpty()) {
+            JSONObject userResponse = requestJson("GET", baseUrl + "/user", null, true);
+            JSONObject userData = userResponse.optJSONObject("data");
+            if (userData != null) {
+                applyAuthTicket(userData.optJSONObject("authTicket"));
+                user = userData.optJSONObject("user");
+            }
+        }
+
+        if (user == null || user.optString("id", "").isEmpty()) {
+            throw new Exception("LibreView hat keine Benutzer-ID für dein persönliches Konto geliefert.");
+        }
+
+        userId = user.optString("id", "");
+    }
+
+    private Reading fetchFromDailyLogReport() throws Exception {
+        JSONObject settings = requestJson("GET", baseUrl + "/reportSettings", null, true);
+        applyTopLevelTicket(settings);
+
+        JSONObject data = settings.optJSONObject("data");
+        JSONObject sources = data == null ? null : data.optJSONObject("dataSources");
+
+        if (sources == null || sources.length() == 0) {
+            throw new Exception(
+                    "LibreView findet keine Datenquelle in deinem Konto. "
+                            + "Prüfe, ob die offizielle Libre-App aktuelle Werte zu LibreView hochlädt."
+            );
+        }
+
+        DeviceSelection selection = selectDevice(sources);
+        if (selection.primaryId == null) {
+            throw new Exception("LibreView konnte kein aktives Libre-Gerät für den Bericht bestimmen.");
+        }
+
+        long now = System.currentTimeMillis() / 1000L;
+        long start = now - (12L * 60L * 60L);
+
+        JSONObject body = new JSONObject();
+        body.put("PrimaryDeviceId", selection.primaryId);
+        body.put("PrimaryDeviceTypeId", selection.primaryType);
+        body.put("SecondaryDeviceIds", new JSONArray(selection.secondaryIds));
+        body.put("PrintReportsWithPatientInformation", false);
+        body.put("ReportIds", new JSONArray().put(500000 + selection.primaryType));
+        body.put("ClientReportIDs", new JSONArray().put(5));
+        body.put("StartDates", new JSONArray().put(start));
+        body.put("EndDate", now);
+        body.put("PatientId", userId);
+        body.put("CultureCode", "de-DE");
+
+        JSONObject reports = requestJson("POST", baseUrl + "/reports", body, true);
+        applyTopLevelTicket(reports);
+
+        JSONObject reportData = reports.optJSONObject("data");
+        String channelUrl = reportData == null ? "" : reportData.optString("url", "");
+        if (channelUrl.isEmpty()) {
+            throw new Exception(apiMessage(reports, "LibreView konnte keinen Daily-Log-Bericht starten."));
+        }
+
+        JSONObject channels = requestJson("GET", channelUrl, null, true);
+        String pollUrl = "";
+        JSONObject channelData = channels.optJSONObject("data");
+        if (channelData != null) {
+            pollUrl = channelData.optString("lp", "");
+        }
+        if (pollUrl.isEmpty()) {
+            throw new Exception("LibreView hat keinen Berichtskanal geliefert.");
+        }
+
+        String reportUrl = waitForReportUrl(pollUrl);
+        String html = requestText(
+                "GET",
+                reportUrl + (reportUrl.contains("?") ? "&" : "?")
+                        + "session=" + URLEncoder.encode(authToken, "UTF-8"),
+                null,
+                false
+        );
+
+        JSONObject report = extractWindowReport(html);
+        return newestReading(report);
+    }
+
+    private DeviceSelection selectDevice(JSONObject sources) {
+        DeviceSelection result = new DeviceSelection();
+        JSONArray names = sources.names();
+        if (names == null) return result;
+
+        double bestScore = Double.MAX_VALUE;
+
+        for (int i = 0; i < names.length(); i++) {
+            String id = names.optString(i, "");
+            JSONObject source = sources.optJSONObject(id);
+            if (source == null) continue;
+
+            int type = source.optInt("type", -1);
+            if (type < 0) continue;
+
+            double score = Double.MAX_VALUE;
+            JSONArray daysData = source.optJSONArray("daysData");
+            if (daysData != null && daysData.length() > 0) {
+                for (int j = 0; j < daysData.length(); j++) {
+                    score = Math.min(score, daysData.optDouble(j, Double.MAX_VALUE));
+                }
+            }
+
+            if (result.primaryId == null || score < bestScore) {
+                if (result.primaryId != null) result.secondaryIds.add(result.primaryId);
+                result.primaryId = id;
+                result.primaryType = type;
+                bestScore = score;
+            } else {
+                result.secondaryIds.add(id);
+            }
+        }
+
+        return result;
+    }
+
+    private String waitForReportUrl(String pollUrl) throws Exception {
+        String lastOperation = "";
+
+        for (int attempt = 0; attempt < 8; attempt++) {
+            JSONObject response = requestJson("GET", pollUrl, null, true);
+            lastOperation = response.optString("operation", "");
+
+            if ("update".equalsIgnoreCase(lastOperation)) {
+                JSONObject args = response.optJSONObject("args");
+                JSONArray urls = args == null ? null : args.optJSONArray("urls");
+                if (urls != null) {
+                    if (urls.length() > 5 && !urls.optString(5, "").isEmpty()) {
+                        return urls.optString(5, "");
+                    }
+                    for (int i = urls.length() - 1; i >= 0; i--) {
+                        String candidate = urls.optString(i, "");
+                        if (!candidate.isEmpty()) return candidate;
+                    }
+                }
+            }
+
+            if (!"started".equalsIgnoreCase(lastOperation) && !lastOperation.isEmpty()) {
+                throw new Exception("LibreView-Bericht meldet Status: " + lastOperation);
+            }
+
+            Thread.sleep(1800L);
+        }
+
+        throw new Exception("LibreView-Bericht ist noch nicht fertig. Bitte in einigen Sekunden erneut aktualisieren.");
+    }
+
+    private Reading newestReading(JSONObject report) throws Exception {
+        JSONObject data = report.optJSONObject("Data");
+        JSONArray days = data == null ? null : data.optJSONArray("Days");
+        if (days == null) {
+            throw new Exception("LibreView-Bericht enthält keine Tagesdaten.");
+        }
+
+        List<ReportPoint> points = new ArrayList<>();
+        for (int i = 0; i < days.length(); i++) {
+            JSONObject day = days.optJSONObject(i);
+            if (day == null) continue;
+            collectGlucose(day.opt("Glucose"), points);
+        }
+
+        if (points.isEmpty()) {
+            throw new Exception("LibreView-Bericht enthält aktuell keine Glukosewerte.");
+        }
+
+        ReportPoint latest = null;
+        ReportPoint previous = null;
+
+        for (ReportPoint p : points) {
+            if (latest == null || p.timestamp > latest.timestamp) {
+                previous = latest;
+                latest = p;
+            } else if (previous == null || p.timestamp > previous.timestamp) {
+                previous = p;
+            }
+        }
+
+        if (latest == null) {
+            throw new Exception("Kein verwertbarer Glukosewert im LibreView-Bericht.");
+        }
+
+        double mgdl = toMgDl(latest.value);
+        int trend = inferTrend(previous, latest);
+
+        String timestamp = new SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                .format(new Date(latest.timestamp * 1000L));
+
+        return new Reading(mgdl, "mg/dL", trend, timestamp);
+    }
+
+    private void collectGlucose(Object node, List<ReportPoint> out) {
+        if (node == null || node == JSONObject.NULL) return;
+
+        if (node instanceof JSONArray) {
+            JSONArray array = (JSONArray) node;
+            for (int i = 0; i < array.length(); i++) {
+                collectGlucose(array.opt(i), out);
+            }
             return;
         }
 
-        String region = data.optString("region", "");
-        if (data.optBoolean("redirect", false) && !region.isEmpty()) {
-            baseUrl = hostFor(region.toUpperCase(Locale.ROOT));
-        } else {
-            String userCountry = "";
-            JSONObject user = data.optJSONObject("user");
-            if (user != null) {
-                userCountry = user.optString("country", "");
+        if (!(node instanceof JSONObject)) return;
+
+        JSONObject object = (JSONObject) node;
+        if (object.has("Value") && object.has("Timestamp")) {
+            double value = object.optDouble("Value", Double.NaN);
+            long timestamp = object.optLong("Timestamp", 0L);
+            if (!Double.isNaN(value) && timestamp > 0L) {
+                out.add(new ReportPoint(timestamp, value));
             }
-            baseUrl = "DE".equalsIgnoreCase(userCountry)
-                    ? "https://api-de.libreview.io"
-                    : "https://api-eu.libreview.io";
         }
     }
 
-    private Reading fetchDirectMeasurements() throws Exception {
-        String url = baseUrl
-                + "/lsl/api/measurements/GetPatientGlucoseMeasurements?country="
-                + URLEncoder.encode(country, "UTF-8")
-                + "&patientId="
-                + URLEncoder.encode(accountId, "UTF-8");
-
-        JSONObject response = legacyRequest("GET", url, null, true);
-
-        if (response.optInt("status", -1) != 0) {
-            throw new Exception("Direkter LibreView-Abruf fehlgeschlagen (Status "
-                    + response.optInt("status", -1) + ").");
-        }
-
-        JSONArray measurements = response.optJSONArray("result");
-        if (measurements == null || measurements.length() == 0) {
-            throw new Exception("LibreView liefert für dein eigenes Konto aktuell keine Live-Messwerte.");
-        }
-
-        for (int i = 0; i < measurements.length(); i++) {
-            JSONObject m = measurements.optJSONObject(i);
-            if (m == null || !m.has("Value")) continue;
-
-            double value = m.optDouble("Value", Double.NaN);
-            if (Double.isNaN(value)) continue;
-
-            int units = m.optInt("GlucoseUnits", 1);
-            String unit = units == 0 ? "mmol/L" : "mg/dL";
-            int trend = m.optInt("TrendArrow", 0);
-            String timestamp = m.optString("Timestamp", "");
-
-            return new Reading(value, unit, trend, timestamp);
-        }
-
-        throw new Exception(
-                "LibreView enthält Daten, aber keinen aktuellen Glukosewert. "
-                        + "Falls das dauerhaft so bleibt, stellt Abbott diesen direkten Live-Endpunkt "
-                        + "für dein Konto nicht zur Verfügung."
-        );
+    private static double toMgDl(double raw) {
+        return raw <= 40.0 ? raw * 18.0182 : raw;
     }
 
-    private JSONObject legacyRequest(String method, String url, JSONObject body, boolean auth) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setRequestMethod(method);
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(15000);
-        c.setUseCaches(false);
-        c.setRequestProperty("Accept", "application/json");
-        c.setRequestProperty("Content-Type", "application/json");
-        c.setRequestProperty("Cache-Control", "no-cache");
-        c.setRequestProperty("Domain", "Libreview");
-        c.setRequestProperty("GatewayType", "LinkUp.Android");
-        c.setRequestProperty("User-Agent", "LibreMirror/0.3 Android");
+    private static int inferTrend(ReportPoint previous, ReportPoint latest) {
+        if (previous == null) return 0;
 
-        if (auth) {
-            c.setRequestProperty("UserToken", userToken);
+        double minutes = (latest.timestamp - previous.timestamp) / 60.0;
+        if (minutes <= 0.0 || minutes > 30.0) return 0;
+
+        double rate = (toMgDl(latest.value) - toMgDl(previous.value)) / minutes;
+
+        if (rate <= -3.0) return 1;
+        if (rate <= -1.5) return 2;
+        if (rate < 1.5) return 3;
+        if (rate < 3.0) return 4;
+        return 5;
+    }
+
+    private JSONObject requestJson(String method, String url, JSONObject body, boolean authenticated) throws Exception {
+        String text = requestText(method, url, body, authenticated);
+        if (text.isEmpty()) return new JSONObject();
+        return new JSONObject(text);
+    }
+
+    private String requestText(String method, String url, JSONObject body, boolean authenticated) throws Exception {
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(20000);
+        connection.setReadTimeout(30000);
+        connection.setUseCaches(false);
+        connection.setInstanceFollowRedirects(true);
+        connection.setRequestProperty("Accept", "application/json,text/html,*/*");
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("Cache-Control", "no-cache");
+        connection.setRequestProperty("User-Agent", "LibreMirror/0.3.2 Android");
+
+        if (authenticated) {
+            connection.setRequestProperty("Authorization", "Bearer " + authToken);
         }
 
         if (body != null) {
-            c.setDoOutput(true);
-            try (OutputStream os = c.getOutputStream()) {
+            connection.setDoOutput(true);
+            try (OutputStream os = connection.getOutputStream()) {
                 os.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
         }
 
-        int code = c.getResponseCode();
-        InputStream stream = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
+        int code = connection.getResponseCode();
+        InputStream stream = code >= 200 && code < 300
+                ? connection.getInputStream()
+                : connection.getErrorStream();
         String text = readAll(stream);
-        c.disconnect();
+        connection.disconnect();
 
         if (code == 401 || code == 403) {
-            throw new AuthException("LibreView-Session abgelaufen.");
+            throw new AuthException("LibreView hat die Sitzung abgelehnt (HTTP " + code + ").");
         }
+
         if (code < 200 || code >= 300) {
             throw new Exception("LibreView HTTP " + code + (text.isEmpty() ? "" : ": " + compact(text)));
         }
 
-        return new JSONObject(text);
+        return text;
     }
 
-    private JSONObject modernRequest(String method, String url, JSONObject body) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setRequestMethod(method);
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(15000);
-        c.setUseCaches(false);
-        c.setRequestProperty("Accept", "application/json");
-        c.setRequestProperty("Content-Type", "application/json");
-        c.setRequestProperty("product", "llu.android");
-        c.setRequestProperty("version", VERSION);
-        c.setRequestProperty("User-Agent", "LibreMirror/0.3 Android");
+    private void applyTopLevelTicket(JSONObject response) {
+        if (response == null) return;
+        applyAuthTicket(response.optJSONObject("ticket"));
+    }
 
-        if (body != null) {
-            c.setDoOutput(true);
-            try (OutputStream os = c.getOutputStream()) {
-                os.write(body.toString().getBytes(StandardCharsets.UTF_8));
+    private void applyAuthTicket(JSONObject ticket) {
+        if (ticket == null) return;
+
+        String token = ticket.optString("token", "");
+        if (!token.isEmpty()) authToken = token;
+
+        long duration = ticket.optLong("duration", 0L);
+        if (duration > 0L) {
+            tokenExpiresAt = System.currentTimeMillis() + duration;
+        } else if (authToken != null) {
+            tokenExpiresAt = System.currentTimeMillis() + (30L * 60L * 1000L);
+        }
+    }
+
+    private static JSONObject extractWindowReport(String html) throws Exception {
+        int marker = html.indexOf("window.report");
+        if (marker < 0) {
+            throw new Exception("LibreView-Bericht konnte nicht gelesen werden: window.report fehlt.");
+        }
+
+        int start = html.indexOf('{', marker);
+        if (start < 0) {
+            throw new Exception("LibreView-Bericht enthält kein JSON-Objekt.");
+        }
+
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+
+        for (int i = start; i < html.length(); i++) {
+            char ch = html.charAt(i);
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+
+            if (ch == '{') depth++;
+            if (ch == '}') {
+                depth--;
+                if (depth == 0) {
+                    return new JSONObject(html.substring(start, i + 1));
+                }
             }
         }
 
-        int code = c.getResponseCode();
-        InputStream stream = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
-        String text = readAll(stream);
-        c.disconnect();
+        throw new Exception("LibreView-Bericht ist unvollständig.");
+    }
 
-        if (code < 200 || code >= 300) {
-            throw new Exception("Regionserkennung HTTP " + code);
+    private static String apiMessage(JSONObject json, String fallback) {
+        if (json == null) return fallback;
+
+        JSONObject error = json.optJSONObject("error");
+        if (error != null) {
+            String message = error.optString("message", "");
+            if (!message.isEmpty()) return message;
         }
 
-        return new JSONObject(text);
+        String message = json.optString("message", "");
+        return message.isEmpty() ? fallback : message;
     }
 
     private static String hostFor(String region) {
@@ -232,11 +453,12 @@ public final class LibreApiClient {
 
     private static String compact(String value) {
         String text = value.replace('\n', ' ').replace('\r', ' ').trim();
-        return text.length() > 180 ? text.substring(0, 180) + "…" : text;
+        return text.length() > 220 ? text.substring(0, 220) + "…" : text;
     }
 
     private static String readAll(InputStream in) throws Exception {
         if (in == null) return "";
+
         StringBuilder sb = new StringBuilder();
         try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             String line;
@@ -274,6 +496,22 @@ public final class LibreApiClient {
                     ? String.format(Locale.getDefault(), "%.1f", value)
                     : String.format(Locale.getDefault(), "%.0f", value);
         }
+    }
+
+    private static final class ReportPoint {
+        final long timestamp;
+        final double value;
+
+        ReportPoint(long timestamp, double value) {
+            this.timestamp = timestamp;
+            this.value = value;
+        }
+    }
+
+    private static final class DeviceSelection {
+        String primaryId;
+        int primaryType;
+        final List<String> secondaryIds = new ArrayList<>();
     }
 
     private static final class AuthException extends Exception {
