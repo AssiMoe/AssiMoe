@@ -87,7 +87,7 @@ final class WidgetRenderer {
             String label;
 
             if (Double.isNaN(numeric)) {
-                background = dark ? R.drawable.widget_alert_neutral : R.drawable.widget_alert_neutral_light;
+                background = R.drawable.widget_alert_neutral;
                 label = "Kein Wert";
             } else if (numeric < low) {
                 background = R.drawable.widget_alert_low;
