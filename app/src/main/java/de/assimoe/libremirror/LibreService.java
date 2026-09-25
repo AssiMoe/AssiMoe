@@ -17,6 +17,7 @@ import android.speech.tts.TextToSpeech;
 
 import java.util.Locale;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,11 +31,12 @@ public class LibreService extends Service {
     private static final int NOTIFICATION_LIVE = 1001;
     private static final int NOTIFICATION_ALERT = 1002;
 
-    private static final long NORMAL_INTERVAL_MS = 60_000L;
+    private static final long MIN_INTERVAL_MS = 60_000L;
     private static final long MAX_BACKOFF_MS = 15L * 60L * 1000L;
     private static final long ALERT_REPEAT_MS = 30L * 60L * 1000L;
 
     private ScheduledExecutorService scheduler;
+    private ScheduledFuture<?> nextPollFuture;
     private final AtomicBoolean polling = new AtomicBoolean(false);
     private LibreApiClient client;
     private int consecutiveFailures = 0;
@@ -51,7 +53,7 @@ public class LibreService extends Service {
         );
 
         scheduler = new ScheduledThreadPoolExecutor(1);
-        scheduler.execute(this::pollSafely);
+        scheduleNext(0L);
     }
 
     @Override
@@ -72,7 +74,7 @@ public class LibreService extends Service {
         }
 
         if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && scheduler != null) {
-            scheduler.execute(this::pollSafely);
+            scheduleNext(0L);
         }
 
         return START_STICKY;
@@ -82,7 +84,8 @@ public class LibreService extends Service {
         if (!polling.compareAndSet(false, true)) return;
 
         PowerManager.WakeLock wakeLock = null;
-        long nextDelay = NORMAL_INTERVAL_MS;
+        SharedPreferences initialPrefs = SecurePrefs.prefs(this);
+        long nextDelay = getSyncIntervalMs(initialPrefs);
 
         try {
             SharedPreferences prefs = SecurePrefs.prefs(this);
@@ -146,7 +149,7 @@ public class LibreService extends Service {
 
             if (scheduler != null && !scheduler.isShutdown()
                     && SecurePrefs.prefs(this).getBoolean("enabled", false)) {
-                scheduler.schedule(this::pollSafely, nextDelay, TimeUnit.MILLISECONDS);
+                scheduleNext(nextDelay);
             }
         }
     }
@@ -202,6 +205,8 @@ public class LibreService extends Service {
                 .putString("history_values", values.toString())
                 .putString("history_points", points.toString())
                 .apply();
+
+        LibreMirrorWidgetProvider.updateAll(this);
     }
 
     private void saveError(String message) {
@@ -213,8 +218,32 @@ public class LibreService extends Service {
 
     private long calculateBackoff() {
         int exponent = Math.min(Math.max(consecutiveFailures - 1, 0), 4);
-        long delay = NORMAL_INTERVAL_MS * (1L << exponent);
+        long base = getSyncIntervalMs(SecurePrefs.prefs(this));
+        long delay = Math.max(MIN_INTERVAL_MS, base) * (1L << exponent);
         return Math.min(delay, MAX_BACKOFF_MS);
+    }
+
+    private long getSyncIntervalMs(SharedPreferences prefs) {
+        int minutes = prefs.getInt("sync_interval_min", 1);
+
+        if (minutes < 1) minutes = 1;
+        if (minutes > 30) minutes = 30;
+
+        return minutes * 60_000L;
+    }
+
+    private synchronized void scheduleNext(long delayMs) {
+        if (scheduler == null || scheduler.isShutdown()) return;
+
+        if (nextPollFuture != null && !nextPollFuture.isDone()) {
+            nextPollFuture.cancel(false);
+        }
+
+        nextPollFuture = scheduler.schedule(
+                this::pollSafely,
+                Math.max(0L, delayMs),
+                TimeUnit.MILLISECONDS
+        );
     }
 
     private void updateLiveNotification(
@@ -312,6 +341,8 @@ public class LibreService extends Service {
                 .setContentTitle(title)
                 .setContentText(body)
                 .setCategory(Notification.CATEGORY_ALARM)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setPriority(Notification.PRIORITY_HIGH)
                 .setAutoCancel(true)
                 .setContentIntent(mainPendingIntent())
                 .build();
@@ -337,6 +368,7 @@ public class LibreService extends Service {
                 .setContentTitle(title)
                 .setContentText(text)
                 .setCategory(Notification.CATEGORY_STATUS)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setOnlyAlertOnce(true)
                 .setOngoing(ongoing)
                 .setShowWhen(false)
@@ -365,16 +397,18 @@ public class LibreService extends Service {
                 "Live-Glukose",
                 NotificationManager.IMPORTANCE_LOW
         );
-        live.setDescription("Laufender Glukosewert für Handy und Smartwatch.");
+        live.setDescription("Laufender Glukosewert für Handy, Sperrbildschirm und Smartwatch.");
         live.setShowBadge(false);
+        live.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
 
         NotificationChannel alerts = new NotificationChannel(
                 CHANNEL_ALERTS,
                 "Glukose-Warnungen",
                 NotificationManager.IMPORTANCE_HIGH
         );
-        alerts.setDescription("Warnungen bei Über- oder Unterschreitung deiner Grenzwerte.");
+        alerts.setDescription("Sichtbare Warnungen bei Über- oder Unterschreitung deiner Grenzwerte.");
         alerts.enableVibration(true);
+        alerts.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
 
         manager.createNotificationChannel(live);
         manager.createNotificationChannel(alerts);
@@ -423,6 +457,11 @@ public class LibreService extends Service {
 
     @Override
     public void onDestroy() {
+        if (nextPollFuture != null) {
+            nextPollFuture.cancel(false);
+            nextPollFuture = null;
+        }
+
         if (scheduler != null) {
             scheduler.shutdownNow();
             scheduler = null;
