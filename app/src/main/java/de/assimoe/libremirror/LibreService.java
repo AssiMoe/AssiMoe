@@ -81,6 +81,7 @@ public class LibreService extends Service {
                     .putString("last_error", "")
                     .apply();
 
+            appendHistory(p, reading);
             showGlucoseNotification(reading);
             checkAlert(reading, p);
             updateService("Letzter Abruf " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date()));
@@ -90,6 +91,21 @@ public class LibreService extends Service {
         } finally {
             if (wl != null && wl.isHeld()) wl.release();
         }
+    }
+
+    private void appendHistory(SharedPreferences prefs, LibreApiClient.Reading reading) {
+        String raw = prefs.getString("history_values", "");
+        String next = raw.isEmpty() ? reading.displayValue() : raw + "," + reading.displayValue();
+        String[] parts = next.split(",");
+        if (parts.length > 24) {
+            StringBuilder trimmed = new StringBuilder();
+            for (int i = parts.length - 24; i < parts.length; i++) {
+                if (trimmed.length() > 0) trimmed.append(',');
+                trimmed.append(parts[i]);
+            }
+            next = trimmed.toString();
+        }
+        prefs.edit().putString("history_values", next).apply();
     }
 
     private void saveError(String error) {
