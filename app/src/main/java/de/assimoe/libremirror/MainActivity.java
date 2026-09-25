@@ -1395,6 +1395,140 @@ public class MainActivity extends Activity {
         return minutes + " Minuten";
     }
 
+    private void startBackupExport() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(
+                Intent.EXTRA_TITLE,
+                "LibreMirror-Backup-"
+                        + new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date())
+                        + ".json"
+        );
+        startActivityForResult(intent, REQ_EXPORT_BACKUP);
+    }
+
+    private void startBackupImport() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        startActivityForResult(intent, REQ_IMPORT_BACKUP);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+
+        Uri uri = data.getData();
+
+        if (requestCode == REQ_EXPORT_BACKUP) {
+            new Thread(() -> {
+                try {
+                    BackupManager.exportBackup(this, uri);
+                    handler.post(() -> toast("Backup erfolgreich gespeichert"));
+                } catch (Exception e) {
+                    handler.post(() -> toast("Backup fehlgeschlagen: " + e.getMessage()));
+                }
+            }).start();
+        } else if (requestCode == REQ_IMPORT_BACKUP) {
+            new Thread(() -> {
+                try {
+                    BackupManager.importBackup(this, uri);
+                    handler.post(() -> {
+                        toast("Backup wiederhergestellt");
+                        recreate();
+                    });
+                } catch (Exception e) {
+                    handler.post(() -> toast("Wiederherstellung fehlgeschlagen: " + e.getMessage()));
+                }
+            }).start();
+        }
+    }
+
+    private void checkForPrivateUpdate() {
+        String url = updateUrl == null ? "" : updateUrl.getText().toString().trim();
+
+        SecurePrefs.prefs(this).edit()
+                .putString("update_manifest_url", url)
+                .apply();
+
+        if (url.isEmpty()) {
+            updateStatusView.setText("Bitte zuerst eine HTTPS-URL zum update.json eintragen.");
+            return;
+        }
+
+        updateStatusView.setText("Update wird geprüft …");
+
+        new Thread(() -> {
+            try {
+                UpdateManager.Result result = UpdateManager.check(
+                        url,
+                        BuildConfig.VERSION_CODE
+                );
+
+                handler.post(() -> {
+                    if (!result.updateAvailable) {
+                        updateStatusView.setText(
+                                "LibreMirror " + BuildConfig.VERSION_NAME + " ist aktuell."
+                        );
+                        return;
+                    }
+
+                    updateStatusView.setText(
+                            "Update " + result.versionName + " verfügbar."
+                    );
+
+                    new AlertDialog.Builder(this)
+                            .setTitle("LibreMirror " + result.versionName)
+                            .setMessage(
+                                    result.notes.isEmpty()
+                                            ? "Eine neue private Version ist verfügbar."
+                                            : result.notes
+                            )
+                            .setNegativeButton("Später", null)
+                            .setPositiveButton("Herunterladen", (dialog, which) ->
+                                    downloadAndInstallUpdate(result)
+                            )
+                            .show();
+                });
+            } catch (Exception e) {
+                handler.post(() ->
+                        updateStatusView.setText("Updateprüfung fehlgeschlagen: " + e.getMessage())
+                );
+            }
+        }).start();
+    }
+
+    private void downloadAndInstallUpdate(UpdateManager.Result result) {
+        if (!UpdateManager.canInstallPackages(this)) {
+            toast("Bitte LibreMirror als Installationsquelle erlauben und danach erneut versuchen.");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startActivity(UpdateManager.unknownSourcesSettings(this));
+            }
+            return;
+        }
+
+        updateStatusView.setText("APK wird heruntergeladen und geprüft …");
+
+        new Thread(() -> {
+            try {
+                java.io.File apk = UpdateManager.download(this, result);
+                handler.post(() -> {
+                    updateStatusView.setText("APK geprüft – Android-Installer wird geöffnet.");
+                    startActivity(UpdateManager.installIntent(this, apk));
+                });
+            } catch (Exception e) {
+                handler.post(() ->
+                        updateStatusView.setText("Update fehlgeschlagen: " + e.getMessage())
+                );
+            }
+        }).start();
+    }
+
     private void confirmLogout() {
         new AlertDialog.Builder(this)
                 .setTitle("LibreMirror zurücksetzen")
