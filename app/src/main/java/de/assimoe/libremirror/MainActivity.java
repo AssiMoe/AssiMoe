@@ -733,13 +733,13 @@ public class MainActivity extends Activity {
 
         card.addView(sectionHeader(
                 R.drawable.ic_nav_now,
-                "Widget & Sperrbildschirm",
-                "Glukosewert kompakt auf Galaxy und Homescreen."
+                "Widgets & Sperrbildschirm",
+                "Fünf LibreMirror-Varianten für Galaxy, LockStar und Homescreen."
         ));
 
         TextView note = text(
-                "LibreMirror enthält ein eigenes Android-Widget. Auf Samsung kann es über Good Lock → LockStar "
-                        + "auch auf Sperrbildschirm und AOD platziert werden.",
+                "Mini und Clean sind für LockStar/AOD gedacht. Compact ist der Standard. "
+                        + "Large zeigt zusätzlich den Verlauf. Alert färbt sich je nach Grenzwertstatus.",
                 12,
                 false,
                 textSecondary
@@ -747,9 +747,34 @@ public class MainActivity extends Activity {
         note.setLineSpacing(dp(1), 1.08f);
         card.addView(note, fullTop(12));
 
-        Button pin = secondaryButton("Widget zum Startbildschirm hinzufügen");
-        pin.setOnClickListener(v -> pinWidget());
-        card.addView(pin, fullHeightTop(50, 12));
+        Button mini = secondaryButton("Mini – Sperrbildschirm");
+        mini.setOnClickListener(v -> pinWidget(LibreMirrorMiniWidgetProvider.class));
+        card.addView(mini, fullHeightTop(48, 12));
+
+        Button clean = secondaryButton("Clean – Sperrbildschirm");
+        clean.setOnClickListener(v -> pinWidget(LibreMirrorCleanWidgetProvider.class));
+        card.addView(clean, fullHeightTop(48, 8));
+
+        Button compact = secondaryButton("Compact – Standard");
+        compact.setOnClickListener(v -> pinWidget(LibreMirrorWidgetProvider.class));
+        card.addView(compact, fullHeightTop(48, 8));
+
+        Button large = secondaryButton("Large – mit Verlauf");
+        large.setOnClickListener(v -> pinWidget(LibreMirrorLargeWidgetProvider.class));
+        card.addView(large, fullHeightTop(48, 8));
+
+        Button alert = secondaryButton("Alert – Grenzwertfarben");
+        alert.setOnClickListener(v -> pinWidget(LibreMirrorAlertWidgetProvider.class));
+        card.addView(alert, fullHeightTop(48, 8));
+
+        TextView lockStarHint = text(
+                "Für den Sperrbildschirm: Good Lock → LockStar → App Widgets → LibreMirror Mini oder Clean.",
+                11,
+                false,
+                textMuted
+        );
+        lockStarHint.setLineSpacing(dp(1), 1.08f);
+        card.addView(lockStarHint, fullTop(10));
 
         return card;
     }
@@ -958,12 +983,9 @@ public class MainActivity extends Activity {
         toast("Aktualisierung angefordert");
     }
 
-    private void pinWidget() {
+    private void pinWidget(Class<?> providerClass) {
         AppWidgetManager manager = AppWidgetManager.getInstance(this);
-        ComponentName provider = new ComponentName(
-                this,
-                LibreMirrorWidgetProvider.class
-        );
+        ComponentName provider = new ComponentName(this, providerClass);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && manager.isRequestPinAppWidgetSupported()) {
