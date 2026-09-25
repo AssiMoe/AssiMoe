@@ -141,6 +141,7 @@ public class LibreService extends Service {
 
             updateLiveNotification(result.current, stale, stale ? "Sensorwert veraltet" : "");
             checkAlerts(result, prefs, stale);
+            maybeCheckPrivateUpdate(prefs);
 
             nextDelay = getAdaptiveIntervalMs(prefs, result.current);
         } catch (OfflineException e) {
@@ -368,6 +369,35 @@ public class LibreService extends Service {
         if (minutes <= 0.0 || minutes > 20.0) return 0.0;
 
         return (latest.mgdl - previous.mgdl) / minutes;
+    }
+
+    private void maybeCheckPrivateUpdate(SharedPreferences prefs) {
+        String url = prefs.getString("update_manifest_url", "").trim();
+        if (url.isEmpty()) return;
+
+        long now = System.currentTimeMillis();
+        long last = prefs.getLong("last_update_check_ms", 0L);
+        if (now - last < 24L * 60L * 60L * 1000L) return;
+
+        prefs.edit().putLong("last_update_check_ms", now).apply();
+
+        try {
+            UpdateManager.Result result = UpdateManager.check(url, BuildConfig.VERSION_CODE);
+
+            prefs.edit()
+                    .putBoolean("update_available", result.updateAvailable)
+                    .putString("update_available_name", result.versionName)
+                    .apply();
+
+            if (result.updateAvailable) {
+                sendAlertNotification(
+                        "LibreMirror Update",
+                        "Version " + result.versionName + " ist verfügbar.",
+                        NOTIFICATION_SYSTEM
+                );
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void maybeSystemAlert(String title, String body, SharedPreferences prefs) {
