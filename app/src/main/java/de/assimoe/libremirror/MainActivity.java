@@ -1577,6 +1577,7 @@ public class MainActivity extends Activity {
         ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancelAll();
 
         boolean keepDark = darkMode;
+        new HistoryDatabase(this).clearHistory();
         SecurePrefs.clearAll(this);
         SecurePrefs.prefs(this).edit().putBoolean("dark_mode", keepDark).apply();
 
