@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 
 public class LibreService extends Service {
     public static final String ACTION_REFRESH = "de.assimoe.libremirror.REFRESH";
+    public static final String ACTION_ACCEPT_TERMS = "de.assimoe.libremirror.ACCEPT_TERMS";
     private static final String CH_SERVICE = "libremirror_service";
     private static final String CH_GLUCOSE = "libremirror_glucose";
     private static final String CH_ALERTS = "libremirror_alerts";
@@ -48,8 +49,12 @@ public class LibreService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && scheduler != null) {
-            scheduler.execute(this::pollSafely);
+        if (intent != null && scheduler != null) {
+            if (ACTION_REFRESH.equals(intent.getAction())) {
+                scheduler.execute(this::pollSafely);
+            } else if (ACTION_ACCEPT_TERMS.equals(intent.getAction())) {
+                scheduler.execute(this::acceptTermsSafely);
+            }
         }
         return START_STICKY;
     }
@@ -82,6 +87,7 @@ public class LibreService extends Service {
                     .putString("last_sensor_time", reading.timestamp)
                     .putLong("last_fetch_ms", System.currentTimeMillis())
                     .putString("last_error", "")
+                    .putBoolean("terms_required", false)
                     .apply();
 
             if (!reading.timestamp.equals(previousSensorTime)) {
@@ -90,9 +96,57 @@ public class LibreService extends Service {
             showGlucoseNotification(reading);
             checkAlert(reading, p);
             updateService("LibreView-Bericht aktualisiert " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date()));
+        } catch (LibreApiClient.TermsRequiredException e) {
+            SecurePrefs.prefs(this).edit()
+                    .putBoolean("terms_required", true)
+                    .putString("last_error", e.getMessage())
+                    .putLong("last_error_ms", System.currentTimeMillis())
+                    .apply();
+            updateService("LibreView-Bedingungen müssen bestätigt werden");
         } catch (Exception e) {
             saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             updateService("Fehler beim Abruf");
+        } finally {
+            if (wl != null && wl.isHeld()) wl.release();
+        }
+    }
+
+    private void acceptTermsSafely() {
+        PowerManager.WakeLock wl = null;
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LibreMirror:terms");
+            wl.acquire(90000);
+
+            SharedPreferences p = SecurePrefs.prefs(this);
+            String email = SecurePrefs.getSecret(this, "email");
+            String password = SecurePrefs.getSecret(this, "password");
+
+            if (email.isEmpty() || password.isEmpty()) {
+                saveError("Bitte LibreView-Zugangsdaten speichern.");
+                return;
+            }
+
+            if (client == null) client = new LibreApiClient(p.getString("region", "AUTO"));
+            LibreApiClient.Reading reading = client.acceptTermsAndFetch(email, password);
+
+            p.edit()
+                    .putBoolean("terms_required", false)
+                    .putString("last_value", reading.displayValue())
+                    .putString("last_unit", reading.unit)
+                    .putInt("last_trend", reading.trend)
+                    .putString("last_sensor_time", reading.timestamp)
+                    .putLong("last_fetch_ms", System.currentTimeMillis())
+                    .putString("last_error", "")
+                    .apply();
+
+            appendHistory(p, reading);
+            showGlucoseNotification(reading);
+            checkAlert(reading, p);
+            updateService("LibreView-Bedingungen bestätigt");
+        } catch (Exception e) {
+            saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+            updateService("Bestätigung fehlgeschlagen");
         } finally {
             if (wl != null && wl.isHeld()) wl.release();
         }
