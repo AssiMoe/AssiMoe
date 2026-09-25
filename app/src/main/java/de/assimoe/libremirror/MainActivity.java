@@ -527,6 +527,78 @@ public class MainActivity extends Activity {
         return scroll;
     }
 
+    private View buildStatisticsPage() {
+        ScrollView scroll = pageScroll();
+        LinearLayout root = pageRoot();
+
+        TextView heading = text("Statistik", 24, true, textPrimary);
+        root.addView(heading);
+
+        TextView sub = text(
+                "Lokale Auswertung deiner gespeicherten LibreMirror-Werte.",
+                12,
+                false,
+                textSecondary
+        );
+        root.addView(sub, wrapTop(3));
+
+        LinearLayout todayCard = card(false);
+        todayCard.addView(sectionHeader(
+                R.drawable.ic_nav_stats,
+                "Heute",
+                "Durchschnitt, Bereich, Minimum und Maximum."
+        ));
+
+        statsTodayView = text("Noch keine Daten.", 14, true, textPrimary);
+        statsTodayView.setLineSpacing(dp(2), 1.12f);
+        todayCard.addView(statsTodayView, fullTop(14));
+        root.addView(todayCard, fullTop(14));
+
+        LinearLayout compareCard = card(false);
+        compareCard.addView(sectionHeader(
+                R.drawable.ic_nav_history,
+                "Tagesvergleich",
+                "Heute im direkten Vergleich zu gestern."
+        ));
+
+        statsYesterdayView = text("Gestern: —", 13, false, textSecondary);
+        statsComparisonView = text("Vergleich: —", 14, true, BLUE);
+        compareCard.addView(statsYesterdayView, fullTop(14));
+        compareCard.addView(statsComparisonView, fullTop(8));
+        root.addView(compareCard, fullTop(14));
+
+        LinearLayout weekCard = card(false);
+        weekCard.addView(sectionHeader(
+                R.drawable.ic_nav_stats,
+                "7 Tage",
+                "Lokaler Überblick über die letzte Woche."
+        ));
+
+        statsWeekView = text("Noch keine Daten.", 13, false, textSecondary);
+        statsWeekView.setLineSpacing(dp(2), 1.12f);
+        weekCard.addView(statsWeekView, fullTop(14));
+        root.addView(weekCard, fullTop(14));
+
+        LinearLayout batteryCard = card(false);
+        batteryCard.addView(sectionHeader(
+                R.drawable.ic_live,
+                "Akku & Synchronisierung",
+                "Wie häufig LibreMirror aktuell arbeitet."
+        ));
+
+        batteryDashboardView = text("Wird berechnet …", 13, false, textSecondary);
+        batteryDashboardView.setLineSpacing(dp(2), 1.12f);
+        batteryCard.addView(batteryDashboardView, fullTop(14));
+
+        cloudStatusView = text("Cloud: —", 13, true, textSecondary);
+        batteryCard.addView(cloudStatusView, fullTop(10));
+
+        root.addView(batteryCard, fullTop(14));
+
+        scroll.addView(root);
+        return scroll;
+    }
+
     private View buildSettingsPage() {
         ScrollView scroll = pageScroll();
         LinearLayout root = pageRoot();
