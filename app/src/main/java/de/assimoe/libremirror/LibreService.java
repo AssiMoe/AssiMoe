@@ -21,6 +21,8 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import de.assimoe.libremirror.core.AdaptiveSyncPolicy;
+import de.assimoe.libremirror.core.SyncMetricsStore;
 import de.assimoe.libremirror.core.SyncStateStore;
 import de.assimoe.libremirror.core.SyncStatus;
 import de.assimoe.libremirror.core.SyncStatusResolver;
@@ -66,7 +68,7 @@ public class LibreService extends Service {
         );
 
         scheduler = new ScheduledThreadPoolExecutor(1);
-        scheduleNext(0L);
+        scheduleNext(0L, "Start");
     }
 
     @Override
@@ -75,12 +77,14 @@ public class LibreService extends Service {
 
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             prefs.edit().putBoolean("enabled", false).apply();
+            SyncMetricsStore.setSchedule(this, 0L, "Live-Dienst aus", 0L);
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
         }
 
         if (!prefs.getBoolean("enabled", false)) {
+            SyncMetricsStore.setSchedule(this, 0L, "Live-Dienst aus", 0L);
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -89,7 +93,7 @@ public class LibreService extends Service {
         if (intent != null
                 && ACTION_REFRESH.equals(intent.getAction())
                 && scheduler != null) {
-            scheduleNext(0L);
+            scheduleNext(0L, "Manuell");
         }
 
         return START_STICKY;
@@ -99,9 +103,13 @@ public class LibreService extends Service {
         if (!polling.compareAndSet(false, true)) return;
 
         long startedMs = System.currentTimeMillis();
+        SyncMetricsStore.recordSyncAttempt(this);
+
         PowerManager.WakeLock wakeLock = null;
         SharedPreferences prefs = SecurePrefs.prefs(this);
-        long nextDelay = getSyncIntervalMs(prefs);
+
+        long nextDelay = AdaptiveSyncPolicy.baseIntervalMs(prefs);
+        String nextReason = "Basisintervall";
 
         try {
             if (!prefs.getBoolean("enabled", false)) {
@@ -119,6 +127,7 @@ public class LibreService extends Service {
                     "LibreMirror:sync"
             );
             wakeLock.acquire(30_000L);
+            SyncMetricsStore.recordWakeup(this);
 
             String email = SecurePrefs.getSecret(this, "email");
             String password = SecurePrefs.getSecret(this, "password");
@@ -163,7 +172,22 @@ public class LibreService extends Service {
                     now - startedMs
             );
 
+            SyncMetricsStore.recordSuccess(
+                    this,
+                    now - startedMs
+            );
+
             consecutiveFailures = 0;
+
+            AdaptiveSyncPolicy.Decision decision =
+                    AdaptiveSyncPolicy.afterSuccess(
+                            prefs,
+                            result.current,
+                            status
+                    );
+
+            nextDelay = decision.delayMs;
+            nextReason = decision.reason;
 
             updateLiveNotification(
                     result.current,
@@ -184,14 +208,22 @@ public class LibreService extends Service {
 
             SyncStateStore.set(this, status, message);
 
+            long durationMs =
+                    System.currentTimeMillis() - startedMs;
+
             try {
                 repository.recordSyncEvent(
                         status,
                         message,
-                        System.currentTimeMillis() - startedMs
+                        durationMs
                 );
             } catch (Exception ignored) {
             }
+
+            SyncMetricsStore.recordFailure(
+                    this,
+                    durationMs
+            );
 
             if (error instanceof LibreApiClient.RateLimitException) {
                 long retryAfter =
@@ -206,9 +238,12 @@ public class LibreService extends Service {
                 nextDelay = calculateBackoff();
             }
 
+            nextReason = "Backoff: " + status.userLabel();
+
             LibreMirrorWidgetProvider.updateAll(this);
             updateNotificationFromCache(
-                    status.userLabel() + " – neuer Versuch automatisch"
+                    status.userLabel()
+                            + " – neuer Versuch automatisch"
             );
         } finally {
             if (wakeLock != null && wakeLock.isHeld()) {
@@ -221,7 +256,7 @@ public class LibreService extends Service {
                     && !scheduler.isShutdown()
                     && SecurePrefs.prefs(this)
                     .getBoolean("enabled", false)) {
-                scheduleNext(nextDelay);
+                scheduleNext(nextDelay, nextReason);
             }
         }
     }
@@ -268,6 +303,10 @@ public class LibreService extends Service {
                 prefs.getString("session_account_hash", ""),
                 prefs.getString("session_patient_id", "")
         );
+
+        client.setRequestObserver(
+                () -> SyncMetricsStore.recordApiRequest(this)
+        );
     }
 
     private void saveSession(LibreApiClient.SessionState session) {
@@ -300,7 +339,7 @@ public class LibreService extends Service {
                 4
         );
 
-        long base = getSyncIntervalMs(
+        long base = AdaptiveSyncPolicy.baseIntervalMs(
                 SecurePrefs.prefs(this)
         );
 
@@ -311,19 +350,10 @@ public class LibreService extends Service {
         return Math.min(delay, MAX_BACKOFF_MS);
     }
 
-    private long getSyncIntervalMs(SharedPreferences prefs) {
-        int minutes = prefs.getInt(
-                "sync_interval_min",
-                1
-        );
-
-        if (minutes < 1) minutes = 1;
-        if (minutes > 30) minutes = 30;
-
-        return minutes * 60_000L;
-    }
-
-    private synchronized void scheduleNext(long delayMs) {
+    private synchronized void scheduleNext(
+            long delayMs,
+            String reason
+    ) {
         if (scheduler == null || scheduler.isShutdown()) {
             return;
         }
@@ -333,9 +363,18 @@ public class LibreService extends Service {
             nextPollFuture.cancel(false);
         }
 
+        long safeDelay = Math.max(0L, delayMs);
+
+        SyncMetricsStore.setSchedule(
+                this,
+                System.currentTimeMillis() + safeDelay,
+                reason,
+                safeDelay
+        );
+
         nextPollFuture = scheduler.schedule(
                 this::pollSafely,
-                Math.max(0L, delayMs),
+                safeDelay,
                 TimeUnit.MILLISECONDS
         );
     }
