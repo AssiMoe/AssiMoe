@@ -33,4 +33,7 @@ public interface GlucoseDao {
 
     @Query("DELETE FROM glucose_readings WHERE timestampMs < :beforeMs")
     void deleteOlderThan(long beforeMs);
+
+    @Query("DELETE FROM glucose_readings")
+    void deleteAll();
 }
