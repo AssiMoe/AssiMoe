@@ -1,9 +1,9 @@
-name: Build LibreMirror 1.3
+name: Build LibreMirror 2.0
 
 on:
   push:
     branches:
-      - libremirror-v1-release
+      - libremirror-v2
   workflow_dispatch:
 
 jobs:
@@ -30,18 +30,25 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Lint release
-        run: gradle --no-daemon :app:lintRelease
+      - name: Lint phone and Wear
+        run: gradle --no-daemon :app:lintRelease :wear:lintRelease
 
-      - name: Build private release APK
-        run: gradle --no-daemon :app:assembleRelease
+      - name: Build phone and Wear APKs
+        run: gradle --no-daemon :app:assembleRelease :wear:assembleRelease
 
-      - name: Verify APK signature
+      - name: Verify APK signatures
         run: |
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs wear/build/outputs/apk/release/wear-release.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LibreMirror-1.3.0-private-release
+          name: LibreMirror-2.0.0-phone
           path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LibreMirror-2.0.0-wear
+          path: wear/build/outputs/apk/release/wear-release.apk
           if-no-files-found: error
