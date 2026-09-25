@@ -22,6 +22,7 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -37,14 +38,38 @@ import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int BLUE = 0xFF0878E8;
-    private static final int BLUE_DARK = 0xFF06366F;
-    private static final int GREEN = 0xFF078B5B;
-    private static final int RED = 0xFFD64848;
-    private static final int ORANGE = 0xFFB57800;
-    private static final int PAGE_BG = 0xFFF6FAFF;
-    private static final int FIELD_BG = 0xFFF7FAFE;
-    private static final int BORDER = 0xFFDCE8F4;
+    private static final int BLUE = 0xFF149CFF;
+    private static final int CYAN = 0xFF22D3EE;
+    private static final int GREEN = 0xFF19D38A;
+    private static final int RED = 0xFFFF6677;
+    private static final int ORANGE = 0xFFFFB020;
+
+    private boolean darkMode;
+
+    private int pageBg;
+    private int surface;
+    private int surface2;
+    private int fieldBg;
+    private int border;
+    private int textPrimary;
+    private int textSecondary;
+    private int textMuted;
+    private int navBg;
+
+    private FrameLayout pageContainer;
+    private View nowPage;
+    private View historyPage;
+    private View settingsPage;
+
+    private LinearLayout navNow;
+    private LinearLayout navHistory;
+    private LinearLayout navSettings;
+    private ImageView navNowIcon;
+    private ImageView navHistoryIcon;
+    private ImageView navSettingsIcon;
+    private TextView navNowText;
+    private TextView navHistoryText;
+    private TextView navSettingsText;
 
     private EditText email;
     private EditText password;
@@ -52,6 +77,7 @@ public class MainActivity extends Activity {
     private EditText high;
     private Spinner region;
     private Switch carVoice;
+    private Switch darkModeSwitch;
 
     private TextView valueView;
     private TextView unitView;
@@ -63,9 +89,16 @@ public class MainActivity extends Activity {
     private TextView patientView;
     private TextView errorView;
     private TextView serviceStatusView;
+
+    private TextView historyValueView;
+    private TextView historyTrendView;
+    private TextView historyRangeView;
+
     private Button startButton;
     private Button refreshButton;
-    private GlucoseChartView chartView;
+
+    private GlucoseChartView compactChart;
+    private FullGlucoseChartView fullChart;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -81,79 +114,119 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        getWindow().setStatusBarColor(Color.WHITE);
-        getWindow().setNavigationBarColor(Color.WHITE);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                            | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-            );
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-            );
-        }
+        darkMode = SecurePrefs.prefs(this).getBoolean("dark_mode", true);
+        applyPalette();
+        applySystemBars();
 
         setContentView(buildUi());
         loadSettings();
         requestNotificationPermission();
+        showPage(0);
         renderState();
     }
 
-    private View buildUi() {
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setBackgroundColor(PAGE_BG);
-        scroll.setClipToPadding(false);
+    private void applyPalette() {
+        if (darkMode) {
+            pageBg = 0xFF07111D;
+            surface = 0xFF0D1B2A;
+            surface2 = 0xFF102337;
+            fieldBg = 0xFF11263A;
+            border = 0xFF203A51;
+            textPrimary = 0xFFF4F8FC;
+            textSecondary = 0xFFB6C7D9;
+            textMuted = 0xFF7890A6;
+            navBg = 0xFF091827;
+        } else {
+            pageBg = 0xFFF4F8FC;
+            surface = 0xFFFFFFFF;
+            surface2 = 0xFFF7FBFF;
+            fieldBg = 0xFFF6F9FD;
+            border = 0xFFDCE8F4;
+            textPrimary = 0xFF0A1E38;
+            textSecondary = 0xFF58708E;
+            textMuted = 0xFF8091A7;
+            navBg = 0xFFFFFFFF;
+        }
+    }
 
+    private void applySystemBars() {
+        getWindow().setStatusBarColor(pageBg);
+        getWindow().setNavigationBarColor(navBg);
+
+        if (!darkMode) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                                | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                );
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                );
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(0);
+        }
+    }
+
+    private View buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(16), dp(18), dp(30));
-        scroll.addView(root);
+        root.setBackgroundColor(pageBg);
 
-        root.addView(buildHeader());
-        root.addView(buildGlucoseCard(), fullTop(18));
-        root.addView(buildSourceCard(), fullTop(16));
-        root.addView(buildLoginCard(), fullTop(16));
-        root.addView(buildWarningCard(), fullTop(16));
-        root.addView(buildActionArea(), fullTop(18));
-
-        TextView footer = text(
-                "Private LibreMirror-Version • Daten werden ausschließlich zwischen deinem Gerät und Abbott/LibreView übertragen. "
-                        + "Nicht als alleinige Grundlage für Therapie- oder Dosierungsentscheidungen verwenden.",
-                11,
-                false,
-                0xFF6E7F95
+        View header = buildHeader();
+        root.addView(
+                header,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                )
         );
-        footer.setGravity(Gravity.CENTER);
-        footer.setLineSpacing(0, 1.15f);
-        root.addView(footer, fullTop(20));
 
-        return scroll;
+        pageContainer = new FrameLayout(this);
+        nowPage = buildNowPage();
+        historyPage = buildHistoryPage();
+        settingsPage = buildSettingsPage();
+
+        pageContainer.addView(nowPage);
+        pageContainer.addView(historyPage);
+        pageContainer.addView(settingsPage);
+
+        root.addView(
+                pageContainer,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        0,
+                        1f
+                )
+        );
+
+        root.addView(
+                buildBottomNav(),
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(78)
+                )
+        );
+
+        return root;
     }
 
     private View buildHeader() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(20), dp(14), dp(20), dp(10));
+        row.setBackgroundColor(pageBg);
 
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.ic_launcher);
-        row.addView(logo, new LinearLayout.LayoutParams(dp(58), dp(58)));
+        row.addView(logo, new LinearLayout.LayoutParams(dp(52), dp(52)));
 
-        LinearLayout titles = new LinearLayout(this);
-        titles.setOrientation(LinearLayout.VERTICAL);
-        titles.setPadding(dp(12), 0, 0, 0);
-
-        titles.addView(text("LibreMirror", 28, true, 0xFF071B3E));
-        titles.addView(
-                text("Libre 3  →  Cloud  →  Watch", 14, false, 0xFF5D7596),
-                wrapTop(2)
-        );
-
+        TextView title = text("LibreMirror", 27, true, textPrimary);
+        title.setPadding(dp(12), 0, 0, 0);
         row.addView(
-                titles,
+                title,
                 new LinearLayout.LayoutParams(
                         0,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -163,24 +236,57 @@ public class MainActivity extends Activity {
 
         TextView version = text(BuildConfig.VERSION_NAME, 11, true, BLUE);
         version.setGravity(Gravity.CENTER);
-        version.setBackground(rounded(0xFFE7F3FF, 18));
         version.setPadding(dp(10), dp(6), dp(10), dp(6));
+        version.setBackground(rounded(
+                darkMode ? 0xFF0B2A45 : 0xFFE5F3FF,
+                18
+        ));
         row.addView(version);
 
         return row;
     }
 
+    private View buildNowPage() {
+        ScrollView scroll = pageScroll();
+        LinearLayout root = pageRoot();
+
+        root.addView(buildGlucoseCard());
+
+        LinearLayout statusCard = card(false);
+        statusCard.addView(sectionHeader(
+                R.drawable.ic_nav_now,
+                "LibreMirror Status",
+                "Live-Dienst und Freigabe auf einen Blick."
+        ));
+
+        patientView = text("Freigabe: —", 13, true, textSecondary);
+        statusCard.addView(patientView, fullTop(14));
+
+        serviceStatusView = text("Live-Dienst: aus", 13, true, textSecondary);
+        statusCard.addView(serviceStatusView, fullTop(7));
+
+        Button quickRefresh = secondaryButton("↻   Jetzt aktualisieren");
+        quickRefresh.setOnClickListener(v -> refreshNow());
+        statusCard.addView(quickRefresh, fullHeightTop(50, 14));
+
+        root.addView(statusCard, fullTop(14));
+
+        scroll.addView(root);
+        return scroll;
+    }
+
     private View buildGlucoseCard() {
         LinearLayout card = card(true);
 
-        LinearLayout titleRow = new LinearLayout(this);
-        titleRow.setOrientation(LinearLayout.HORIZONTAL);
-        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView overline = text("GLUKOSE LIVE", 12, true, 0xFF58759A);
-        overline.setLetterSpacing(0.08f);
-        titleRow.addView(
-                overline,
+        TextView label = text("GLUKOSE LIVE", 12, true, textSecondary);
+        label.setLetterSpacing(0.08f);
+
+        top.addView(
+                label,
                 new LinearLayout.LayoutParams(
                         0,
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -188,17 +294,20 @@ public class MainActivity extends Activity {
                 )
         );
 
-        TextView source = text("LIBRELINKUP", 10, true, BLUE);
-        source.setPadding(dp(10), dp(5), dp(10), dp(5));
-        source.setBackground(rounded(0xFFE5F3FF, 15));
-        titleRow.addView(source);
+        TextView live = text("LIVE", 10, true, BLUE);
+        live.setPadding(dp(10), dp(5), dp(10), dp(5));
+        live.setBackground(rounded(
+                darkMode ? 0xFF0B2A45 : 0xFFE5F3FF,
+                14
+        ));
+        top.addView(live);
 
-        card.addView(titleRow);
+        card.addView(top);
 
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.HORIZONTAL);
         main.setGravity(Gravity.CENTER_VERTICAL);
-        card.addView(main, fullTop(8));
+        card.addView(main, fullTop(10));
 
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
@@ -207,12 +316,12 @@ public class MainActivity extends Activity {
         valueRow.setOrientation(LinearLayout.HORIZONTAL);
         valueRow.setGravity(Gravity.BOTTOM);
 
-        valueView = text("—", 58, true, BLUE_DARK);
+        valueView = text("—", 62, true, darkMode ? 0xFFF5FAFF : 0xFF06366F);
         valueView.setIncludeFontPadding(false);
         valueRow.addView(valueView);
 
-        unitView = text("mg/dL", 20, true, 0xFF183B6B);
-        unitView.setPadding(dp(8), 0, 0, dp(7));
+        unitView = text("mg/dL", 20, true, textSecondary);
+        unitView.setPadding(dp(8), 0, 0, dp(8));
         valueRow.addView(unitView);
 
         left.addView(valueRow);
@@ -220,7 +329,10 @@ public class MainActivity extends Activity {
         connectionChip = text("●  Nicht verbunden", 13, true, RED);
         connectionChip.setGravity(Gravity.CENTER);
         connectionChip.setPadding(dp(12), dp(6), dp(12), dp(6));
-        connectionChip.setBackground(rounded(0xFFFFEBEE, 18));
+        connectionChip.setBackground(rounded(
+                darkMode ? 0xFF321C27 : 0xFFFFEBEE,
+                18
+        ));
         left.addView(connectionChip, wrapTop(8));
 
         main.addView(
@@ -236,11 +348,11 @@ public class MainActivity extends Activity {
         trend.setOrientation(LinearLayout.VERTICAL);
         trend.setGravity(Gravity.CENTER);
 
-        trendArrowView = text("→", 54, false, GREEN);
+        trendArrowView = text("→", 52, false, GREEN);
         trendArrowView.setGravity(Gravity.CENTER);
         trend.addView(
                 trendArrowView,
-                new LinearLayout.LayoutParams(dp(88), dp(64))
+                new LinearLayout.LayoutParams(dp(90), dp(62))
         );
 
         trendLabelView = text("Kein Wert", 14, true, GREEN);
@@ -250,27 +362,27 @@ public class MainActivity extends Activity {
         main.addView(
                 trend,
                 new LinearLayout.LayoutParams(
-                        dp(100),
+                        dp(104),
                         LinearLayout.LayoutParams.WRAP_CONTENT
                 )
         );
 
-        chartView = new GlucoseChartView(this);
+        compactChart = new GlucoseChartView(this);
+        compactChart.setDarkMode(darkMode);
         card.addView(
-                chartView,
+                compactChart,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(92)
+                        dp(105)
                 )
         );
 
-        LinearLayout statusRow = new LinearLayout(this);
-        statusRow.setOrientation(LinearLayout.HORIZONTAL);
-        statusRow.setGravity(Gravity.CENTER_VERTICAL);
-        card.addView(statusRow, fullTop(6));
+        LinearLayout meta = new LinearLayout(this);
+        meta.setOrientation(LinearLayout.HORIZONTAL);
+        meta.setGravity(Gravity.CENTER_VERTICAL);
 
-        updatedView = text("Sync: —", 12, false, 0xFF607998);
-        statusRow.addView(
+        updatedView = text("Sync: —", 12, false, textMuted);
+        meta.addView(
                 updatedView,
                 new LinearLayout.LayoutParams(
                         0,
@@ -279,9 +391,11 @@ public class MainActivity extends Activity {
                 )
         );
 
-        sensorAgeView = text("Sensor: —", 12, false, 0xFF607998);
+        sensorAgeView = text("Sensor: —", 12, false, textMuted);
         sensorAgeView.setGravity(Gravity.END);
-        statusRow.addView(sensorAgeView);
+        meta.addView(sensorAgeView);
+
+        card.addView(meta, fullTop(7));
 
         errorView = text("", 12, false, RED);
         errorView.setVisibility(View.GONE);
@@ -291,91 +405,140 @@ public class MainActivity extends Activity {
         return card;
     }
 
-    private View buildSourceCard() {
-        LinearLayout card = card(false);
+    private View buildHistoryPage() {
+        ScrollView scroll = pageScroll();
+        LinearLayout root = pageRoot();
 
-        card.addView(
-                sectionHeader(
-                        android.R.drawable.ic_menu_share,
-                        "Datenquelle",
-                        "Stabiler LibreLinkUp-Follower-Livezugriff.",
-                        text("", 1, false, Color.TRANSPARENT)
-                )
-        );
+        TextView heading = text("Verlauf", 24, true, textPrimary);
+        root.addView(heading);
 
-        LinearLayout route = new LinearLayout(this);
-        route.setOrientation(LinearLayout.VERTICAL);
-        route.setPadding(dp(14), dp(12), dp(14), dp(12));
-        route.setBackground(roundedWithStroke(FIELD_BG, BORDER, 16));
-
-        route.addView(
-                text(
-                        "Libre 3 Sensor  →  offizielle Libre-App  →  Abbott Cloud",
-                        13,
-                        true,
-                        0xFF183B6B
-                )
-        );
-        route.addView(
-                text(
-                        "→  LibreLinkUp-Freigabe  →  LibreMirror",
-                        13,
-                        true,
-                        0xFF183B6B
-                ),
-                wrapTop(4)
-        );
-
-        card.addView(route, fullTop(12));
-
-        TextView note = text(
-                "LibreLinkUp muss nur einmal für Konto/Freigabe eingerichtet und die Einladung angenommen werden. "
-                        + "Danach kann die LibreLinkUp-App wieder deinstalliert werden; LibreMirror fragt die Freigabe direkt ab.",
+        TextView sub = text(
+                "Glukoseverlauf aus deiner LibreLinkUp-Freigabe.",
                 12,
                 false,
-                0xFF607998
+                textSecondary
         );
-        note.setLineSpacing(dp(2), 1.12f);
-        card.addView(note, fullTop(10));
+        root.addView(sub, wrapTop(3));
 
-        patientView = text("Freigabe: —", 12, true, 0xFF526A8A);
-        card.addView(patientView, fullTop(10));
+        LinearLayout summary = card(false);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.BOTTOM);
 
-        serviceStatusView = text("Live-Dienst: aus", 12, true, 0xFF526A8A);
-        card.addView(serviceStatusView, fullTop(5));
+        historyValueView = text("—", 40, true, textPrimary);
+        row.addView(historyValueView);
 
-        return card;
+        TextView unit = text("mg/dL", 16, true, textSecondary);
+        unit.setPadding(dp(8), 0, 0, dp(5));
+        row.addView(unit);
+
+        historyTrendView = text("→", 34, false, GREEN);
+        historyTrendView.setGravity(Gravity.END);
+        row.addView(
+                historyTrendView,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
+        );
+
+        summary.addView(row);
+
+        historyRangeView = text(
+                "Zielbereich 70–180 mg/dL",
+                12,
+                true,
+                textSecondary
+        );
+        summary.addView(historyRangeView, fullTop(4));
+
+        root.addView(summary, fullTop(14));
+
+        LinearLayout chartCard = card(false);
+        TextView chartTitle = text("Tagesverlauf", 17, true, textPrimary);
+        chartCard.addView(chartTitle);
+
+        TextView chartSub = text(
+                "Blau = Glukose • Fläche = Zielbereich • gestrichelt = Grenzwerte",
+                11,
+                false,
+                textMuted
+        );
+        chartCard.addView(chartSub, wrapTop(3));
+
+        fullChart = new FullGlucoseChartView(this);
+        fullChart.setDarkMode(darkMode);
+        chartCard.addView(
+                fullChart,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(390)
+                )
+        );
+
+        root.addView(chartCard, fullTop(14));
+
+        TextView note = text(
+                "Der Verlauf dient der Übersicht. Für Therapie- und Dosierungsentscheidungen weiterhin die offizielle Libre-App verwenden.",
+                11,
+                false,
+                textMuted
+        );
+        note.setGravity(Gravity.CENTER);
+        note.setLineSpacing(dp(1), 1.08f);
+        root.addView(note, fullTop(14));
+
+        scroll.addView(root);
+        return scroll;
     }
 
-    private View buildLoginCard() {
+    private View buildSettingsPage() {
+        ScrollView scroll = pageScroll();
+        LinearLayout root = pageRoot();
+
+        TextView heading = text("Einstellungen", 24, true, textPrimary);
+        root.addView(heading);
+
+        root.addView(buildAccountSettings(), fullTop(14));
+        root.addView(buildAlertSettings(), fullTop(14));
+        root.addView(buildAppearanceSettings(), fullTop(14));
+        root.addView(buildServiceSettings(), fullTop(14));
+
+        TextView footer = text(
+                "Private LibreMirror-Version • Zugangsdaten und Session werden lokal verschlüsselt gespeichert.",
+                11,
+                false,
+                textMuted
+        );
+        footer.setGravity(Gravity.CENTER);
+        root.addView(footer, fullTop(18));
+
+        scroll.addView(root);
+        return scroll;
+    }
+
+    private View buildAccountSettings() {
         LinearLayout card = card(false);
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
 
-        TextView chevron = text("⌃", 22, true, 0xFF5D7596);
-
-        LinearLayout header = sectionHeader(
+        card.addView(sectionHeader(
                 android.R.drawable.ic_menu_myplaces,
                 "LibreLinkUp Konto",
-                "Follower-Konto für die bestehende Freigabe.",
-                chevron
-        );
-
-        card.addView(header);
-        card.addView(content, fullTop(12));
+                "Follower-Konto für die bestehende Freigabe."
+        ));
 
         email = field(
                 "Follower-E-Mail-Adresse",
                 InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
         );
-        content.addView(email);
+        card.addView(email, fullTop(14));
 
         LinearLayout passwordWrap = new LinearLayout(this);
         passwordWrap.setOrientation(LinearLayout.VERTICAL);
-        passwordWrap.setBackground(roundedWithStroke(FIELD_BG, BORDER, 16));
+        passwordWrap.setBackground(roundedWithStroke(fieldBg, border, 16));
         passwordWrap.setPadding(dp(14), dp(7), dp(10), dp(7));
 
-        passwordWrap.addView(text("Passwort", 11, true, 0xFF5B7190));
+        passwordWrap.addView(text("Passwort", 11, true, textSecondary));
 
         LinearLayout passRow = new LinearLayout(this);
         passRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -383,7 +546,7 @@ public class MainActivity extends Activity {
 
         password = new EditText(this);
         password.setTextSize(17);
-        password.setTextColor(0xFF142847);
+        password.setTextColor(textPrimary);
         password.setSingleLine(true);
         password.setBackgroundColor(Color.TRANSPARENT);
         password.setInputType(
@@ -399,7 +562,6 @@ public class MainActivity extends Activity {
 
         TextView show = text("ANZEIGEN", 10, true, BLUE);
         show.setGravity(Gravity.CENTER);
-        show.setPadding(dp(8), 0, dp(8), 0);
         show.setOnClickListener(v -> {
             int position = password.getSelectionStart();
 
@@ -418,18 +580,18 @@ public class MainActivity extends Activity {
 
         passRow.addView(
                 show,
-                new LinearLayout.LayoutParams(dp(88), dp(42))
+                new LinearLayout.LayoutParams(dp(92), dp(42))
         );
 
         passwordWrap.addView(passRow);
-        content.addView(passwordWrap, fullTop(10));
+        card.addView(passwordWrap, fullTop(10));
 
         LinearLayout regionBox = new LinearLayout(this);
         regionBox.setOrientation(LinearLayout.VERTICAL);
-        regionBox.setBackground(roundedWithStroke(FIELD_BG, BORDER, 16));
+        regionBox.setBackground(roundedWithStroke(fieldBg, border, 16));
         regionBox.setPadding(dp(14), dp(7), dp(10), dp(7));
 
-        regionBox.addView(text("Region", 11, true, 0xFF5B7190));
+        regionBox.addView(text("Region", 11, true, textSecondary));
 
         region = new Spinner(this);
         String[] regions = {
@@ -453,7 +615,7 @@ public class MainActivity extends Activity {
                         convertView,
                         parent
                 );
-                view.setTextColor(0xFF142847);
+                view.setTextColor(textPrimary);
                 view.setTextSize(17);
                 view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
                 view.setPadding(0, 0, 0, 0);
@@ -463,7 +625,6 @@ public class MainActivity extends Activity {
 
         region.setAdapter(adapter);
         region.setBackgroundColor(Color.TRANSPARENT);
-
         regionBox.addView(
                 region,
                 new LinearLayout.LayoutParams(
@@ -472,54 +633,25 @@ public class MainActivity extends Activity {
                 )
         );
 
-        content.addView(regionBox, fullTop(10));
-
-        TextView hint = text(
-                "AUTO erkennt die Abbott-Region automatisch. Nutze hier die Zugangsdaten des Follower-Kontos, "
-                        + "nicht zwingend die Zugangsdaten der Person mit dem Sensor.",
-                11,
-                false,
-                0xFF7186A1
-        );
-        hint.setLineSpacing(dp(1), 1.1f);
-        content.addView(hint, fullTop(8));
-
-        header.setOnClickListener(v -> {
-            if (content.getVisibility() == View.VISIBLE) {
-                content.setVisibility(View.GONE);
-                chevron.setText("⌄");
-            } else {
-                content.setVisibility(View.VISIBLE);
-                chevron.setText("⌃");
-            }
-        });
+        card.addView(regionBox, fullTop(10));
 
         return card;
     }
 
-    private View buildWarningCard() {
+    private View buildAlertSettings() {
         LinearLayout card = card(false);
-        LinearLayout content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
 
-        TextView chevron = text("⌃", 22, true, 0xFF5D7596);
-
-        LinearLayout header = sectionHeader(
+        card.addView(sectionHeader(
                 android.R.drawable.ic_dialog_alert,
                 "Warnungen",
-                "Eigene Grenzwerte für Handy und Watch.",
-                chevron
-        );
-
-        card.addView(header);
-        card.addView(content, fullTop(12));
+                "Eigene Grenzwerte und Auto-Sprachausgabe."
+        ));
 
         LinearLayout limits = new LinearLayout(this);
         limits.setOrientation(LinearLayout.HORIZONTAL);
 
-        LinearLayout lowBox = smallNumberBox("Niedrig (mg/dL)");
+        LinearLayout lowBox = smallNumberBox("Niedrig");
         low = (EditText) lowBox.getChildAt(1);
-
         limits.addView(
                 lowBox,
                 new LinearLayout.LayoutParams(
@@ -532,9 +664,8 @@ public class MainActivity extends Activity {
         View gap = new View(this);
         limits.addView(gap, new LinearLayout.LayoutParams(dp(10), 1));
 
-        LinearLayout highBox = smallNumberBox("Hoch (mg/dL)");
+        LinearLayout highBox = smallNumberBox("Hoch");
         high = (EditText) highBox.getChildAt(1);
-
         limits.addView(
                 highBox,
                 new LinearLayout.LayoutParams(
@@ -544,132 +675,141 @@ public class MainActivity extends Activity {
                 )
         );
 
-        content.addView(limits);
-
-        View divider = new View(this);
-        divider.setBackgroundColor(0xFFE8EFF7);
-
-        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(1)
-        );
-        dividerParams.topMargin = dp(14);
-
-        content.addView(divider, dividerParams);
-
-        LinearLayout carRow = new LinearLayout(this);
-        carRow.setOrientation(LinearLayout.HORIZONTAL);
-        carRow.setGravity(Gravity.CENTER_VERTICAL);
-        carRow.setPadding(0, dp(12), 0, 0);
-
-        ImageView carIcon = circleIcon(android.R.drawable.ic_menu_directions);
-        carRow.addView(
-                carIcon,
-                new LinearLayout.LayoutParams(dp(44), dp(44))
-        );
-
-        LinearLayout carText = new LinearLayout(this);
-        carText.setOrientation(LinearLayout.VERTICAL);
-        carText.setPadding(dp(10), 0, dp(8), 0);
-
-        carText.addView(
-                text(
-                        "Auto-Modus – Sprachwarnungen",
-                        14,
-                        true,
-                        0xFF142847
-                )
-        );
-        carText.addView(
-                text(
-                        "Grenzwertwarnungen im Android-Car-Modus vorlesen.",
-                        11,
-                        false,
-                        0xFF7186A1
-                ),
-                wrapTop(2)
-        );
-
-        carRow.addView(
-                carText,
-                new LinearLayout.LayoutParams(
-                        0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        1f
-                )
-        );
+        card.addView(limits, fullTop(14));
 
         carVoice = new Switch(this);
-        carVoice.setShowText(false);
-
-        carRow.addView(
-                carVoice,
-                new LinearLayout.LayoutParams(dp(58), dp(44))
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_car,
+                        "Auto-Sprachwarnungen",
+                        "Grenzwertwarnungen im Car-Modus vorlesen.",
+                        carVoice
+                ),
+                fullTop(12)
         );
-
-        content.addView(carRow);
-
-        header.setOnClickListener(v -> {
-            if (content.getVisibility() == View.VISIBLE) {
-                content.setVisibility(View.GONE);
-                chevron.setText("⌄");
-            } else {
-                content.setVisibility(View.VISIBLE);
-                chevron.setText("⌃");
-            }
-        });
 
         return card;
     }
 
-    private View buildActionArea() {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
+    private View buildAppearanceSettings() {
+        LinearLayout card = card(false);
 
-        startButton = new Button(this);
-        startButton.setText("▶   Speichern & Live starten");
-        startButton.setTextSize(16);
-        startButton.setTextColor(Color.WHITE);
-        startButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        startButton.setAllCaps(false);
-        startButton.setGravity(Gravity.CENTER);
-        startButton.setBackground(gradientButton());
+        card.addView(sectionHeader(
+                R.drawable.ic_theme,
+                "Darstellung",
+                "LibreMirror nach deinem Geschmack."
+        ));
+
+        darkModeSwitch = new Switch(this);
+        darkModeSwitch.setChecked(darkMode);
+
+        View row = settingSwitchRow(
+                R.drawable.ic_theme,
+                "Dark Mode",
+                darkMode ? "Dunkles LibreMirror-Design aktiv." : "Helles LibreMirror-Design aktiv.",
+                darkModeSwitch
+        );
+
+        darkModeSwitch.setOnCheckedChangeListener((button, checked) -> {
+            if (checked == darkMode) return;
+
+            SecurePrefs.prefs(this).edit()
+                    .putBoolean("dark_mode", checked)
+                    .apply();
+
+            recreate();
+        });
+
+        card.addView(row, fullTop(10));
+        return card;
+    }
+
+    private View buildServiceSettings() {
+        LinearLayout card = card(false);
+
+        card.addView(sectionHeader(
+                R.drawable.ic_live,
+                "Live-Dienst",
+                "Synchronisierung, Watch und lokale Daten."
+        ));
+
+        startButton = primaryButton("▶   Speichern & Live starten");
         startButton.setOnClickListener(v -> saveAndStart());
+        card.addView(startButton, fullHeightTop(54, 14));
 
-        box.addView(
-                startButton,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(58)
-                )
-        );
-
-        refreshButton = new Button(this);
-        refreshButton.setText("↻   Jetzt aktualisieren");
-        refreshButton.setTextSize(15);
-        refreshButton.setTextColor(BLUE);
-        refreshButton.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        refreshButton.setAllCaps(false);
-        refreshButton.setGravity(Gravity.CENTER);
-        refreshButton.setBackground(
-                roundedWithStroke(Color.TRANSPARENT, 0xFF84BEF5, 18)
-        );
+        refreshButton = secondaryButton("↻   Jetzt aktualisieren");
         refreshButton.setOnClickListener(v -> refreshNow());
+        card.addView(refreshButton, fullHeightTop(50, 10));
 
-        box.addView(refreshButton, fullHeightTop(56, 10));
-
-        Button logout = new Button(this);
-        logout.setText("Abmelden & lokale Daten löschen");
-        logout.setTextSize(13);
+        Button logout = secondaryButton("Abmelden & lokale Daten löschen");
         logout.setTextColor(RED);
-        logout.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        logout.setAllCaps(false);
-        logout.setBackgroundColor(Color.TRANSPARENT);
         logout.setOnClickListener(v -> confirmLogout());
+        card.addView(logout, fullHeightTop(50, 10));
 
-        box.addView(logout, fullHeightTop(48, 8));
+        return card;
+    }
 
-        return box;
+    private View buildBottomNav() {
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
+        nav.setGravity(Gravity.CENTER);
+        nav.setPadding(dp(8), dp(5), dp(8), dp(5));
+        nav.setBackgroundColor(navBg);
+        nav.setElevation(dp(10));
+
+        navNow = navItem(R.drawable.ic_nav_now, "Jetzt", 0);
+        navHistory = navItem(R.drawable.ic_nav_history, "Verlauf", 1);
+        navSettings = navItem(R.drawable.ic_nav_settings, "Einstellungen", 2);
+
+        navNowIcon = (ImageView) navNow.getChildAt(0);
+        navNowText = (TextView) navNow.getChildAt(1);
+
+        navHistoryIcon = (ImageView) navHistory.getChildAt(0);
+        navHistoryText = (TextView) navHistory.getChildAt(1);
+
+        navSettingsIcon = (ImageView) navSettings.getChildAt(0);
+        navSettingsText = (TextView) navSettings.getChildAt(1);
+
+        nav.addView(navNow, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        nav.addView(navHistory, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        nav.addView(navSettings, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+
+        return nav;
+    }
+
+    private LinearLayout navItem(int iconRes, String label, int page) {
+        LinearLayout item = new LinearLayout(this);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setGravity(Gravity.CENTER);
+        item.setPadding(dp(4), dp(3), dp(4), dp(3));
+
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconRes);
+        icon.setColorFilter(textMuted);
+        item.addView(icon, new LinearLayout.LayoutParams(dp(26), dp(26)));
+
+        TextView text = text(label, 11, true, textMuted);
+        text.setGravity(Gravity.CENTER);
+        item.addView(text, wrapTop(2));
+
+        item.setOnClickListener(v -> showPage(page));
+        return item;
+    }
+
+    private void showPage(int page) {
+        nowPage.setVisibility(page == 0 ? View.VISIBLE : View.GONE);
+        historyPage.setVisibility(page == 1 ? View.VISIBLE : View.GONE);
+        settingsPage.setVisibility(page == 2 ? View.VISIBLE : View.GONE);
+
+        tintNav(navNowIcon, navNowText, page == 0);
+        tintNav(navHistoryIcon, navHistoryText, page == 1);
+        tintNav(navSettingsIcon, navSettingsText, page == 2);
+    }
+
+    private void tintNav(ImageView icon, TextView label, boolean active) {
+        int color = active ? BLUE : textMuted;
+        icon.setColorFilter(color);
+        label.setTextColor(color);
     }
 
     private void saveAndStart() {
@@ -681,14 +821,8 @@ public class MainActivity extends Activity {
             return;
         }
 
-        double lowValue = parseDouble(
-                low.getText().toString(),
-                70.0
-        );
-        double highValue = parseDouble(
-                high.getText().toString(),
-                180.0
-        );
+        double lowValue = parseDouble(low.getText().toString(), 70.0);
+        double highValue = parseDouble(high.getText().toString(), 180.0);
 
         if (lowValue >= highValue) {
             toast("Der niedrige Grenzwert muss unter dem hohen liegen");
@@ -717,6 +851,7 @@ public class MainActivity extends Activity {
             startServiceCompat(new Intent(this, LibreService.class));
 
             toast("LibreMirror Live gestartet");
+            showPage(0);
             renderState();
         } catch (Exception e) {
             toast("Speichern fehlgeschlagen");
@@ -753,7 +888,9 @@ public class MainActivity extends Activity {
 
         ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).cancelAll();
 
+        boolean keepDark = darkMode;
         SecurePrefs.clearAll(this);
+        SecurePrefs.prefs(this).edit().putBoolean("dark_mode", keepDark).apply();
 
         email.setText("");
         password.setText("");
@@ -763,6 +900,7 @@ public class MainActivity extends Activity {
         carVoice.setChecked(true);
 
         toast("Lokale LibreMirror-Daten gelöscht");
+        showPage(0);
         renderState();
     }
 
@@ -801,41 +939,37 @@ public class MainActivity extends Activity {
         String error = prefs.getString("last_error", "");
         boolean enabled = prefs.getBoolean("enabled", false);
 
+        double lowValue = parseDouble(prefs.getString("low", "70"), 70.0);
+        double highValue = parseDouble(prefs.getString("high", "180"), 180.0);
+
         long now = System.currentTimeMillis();
         boolean stale = sensorMs > 0L && now - sensorMs > 5L * 60L * 1000L;
 
         if (!value.isEmpty()) {
             valueView.setText(value);
-            unitView.setText("mg/dL");
+            historyValueView.setText(value);
             trendArrowView.setText(LibreApiClient.arrow(trend));
             trendLabelView.setText(LibreApiClient.trendLabel(trend));
+            historyTrendView.setText(LibreApiClient.arrow(trend));
 
             if (error.isEmpty() && !stale) {
-                setConnectionChip("●  Verbunden", GREEN, 0xFFE6F8EF);
+                setConnectionChip("●  Verbunden", GREEN, darkMode ? 0xFF113D31 : 0xFFE6F8EF);
             } else if (stale) {
-                setConnectionChip("●  Wert veraltet", ORANGE, 0xFFFFF3D9);
+                setConnectionChip("●  Wert veraltet", ORANGE, darkMode ? 0xFF3C3116 : 0xFFFFF3D9);
             } else {
-                setConnectionChip("●  Letzter Wert", ORANGE, 0xFFFFF3D9);
+                setConnectionChip("●  Letzter Wert", ORANGE, darkMode ? 0xFF3C3116 : 0xFFFFF3D9);
             }
         } else {
             valueView.setText("—");
-            unitView.setText("mg/dL");
+            historyValueView.setText("—");
             trendArrowView.setText("→");
             trendLabelView.setText("Kein Wert");
-            setConnectionChip("●  Nicht verbunden", RED, 0xFFFFEBEE);
+            historyTrendView.setText("→");
+            setConnectionChip("●  Nicht verbunden", RED, darkMode ? 0xFF321C27 : 0xFFFFEBEE);
         }
 
-        updatedView.setText(
-                syncMs > 0L
-                        ? "Sync: " + time(syncMs)
-                        : "Sync: —"
-        );
-
-        sensorAgeView.setText(
-                sensorMs > 0L
-                        ? "Sensor: vor " + ageText(now - sensorMs)
-                        : "Sensor: —"
-        );
+        updatedView.setText(syncMs > 0L ? "Sync: " + time(syncMs) : "Sync: —");
+        sensorAgeView.setText(sensorMs > 0L ? "Sensor: vor " + ageText(now - sensorMs) : "Sensor: —");
 
         if (error.isEmpty()) {
             errorView.setVisibility(View.GONE);
@@ -845,18 +979,14 @@ public class MainActivity extends Activity {
             errorView.setText(error);
         }
 
-        patientView.setText(
-                patient.isEmpty()
-                        ? "Freigabe: —"
-                        : "Freigabe: " + patient
-        );
+        patientView.setText(patient.isEmpty() ? "Freigabe: —" : "Freigabe: " + patient);
 
         serviceStatusView.setText(
                 enabled
                         ? "Live-Dienst: aktiv • ca. alle 60 Sekunden"
                         : "Live-Dienst: aus"
         );
-        serviceStatusView.setTextColor(enabled ? GREEN : 0xFF526A8A);
+        serviceStatusView.setTextColor(enabled ? GREEN : textSecondary);
 
         startButton.setText(
                 enabled
@@ -867,8 +997,22 @@ public class MainActivity extends Activity {
         refreshButton.setEnabled(enabled);
         refreshButton.setAlpha(enabled ? 1f : 0.5f);
 
-        chartView.setValues(
-                readHistory(prefs.getString("history_values", ""))
+        historyRangeView.setText(
+                "Zielbereich " + formatNumber(lowValue) + "–" + formatNumber(highValue) + " mg/dL"
+        );
+
+        List<Float> history = readHistory(prefs.getString("history_values", ""));
+        compactChart.setValues(history);
+
+        HistoryData historyData = readHistoryPoints(
+                prefs.getString("history_points", ""),
+                history
+        );
+        fullChart.setData(
+                historyData.times,
+                historyData.values,
+                (float) lowValue,
+                (float) highValue
         );
     }
 
@@ -876,6 +1020,42 @@ public class MainActivity extends Activity {
         connectionChip.setText(label);
         connectionChip.setTextColor(color);
         connectionChip.setBackground(rounded(background, 18));
+    }
+
+    private HistoryData readHistoryPoints(String raw, List<Float> fallback) {
+        HistoryData result = new HistoryData();
+
+        if (raw != null && !raw.trim().isEmpty()) {
+            String[] points = raw.split(";");
+
+            for (String point : points) {
+                String[] parts = point.split(",");
+
+                if (parts.length != 2) continue;
+
+                try {
+                    result.times.add(Long.parseLong(parts[0]));
+                    result.values.add(Float.parseFloat(parts[1]));
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        if (result.values.size() < 2 && fallback != null) {
+            result.times.clear();
+            result.values.clear();
+
+            long now = System.currentTimeMillis();
+            long step = 5L * 60L * 1000L;
+            long start = now - Math.max(0, fallback.size() - 1) * step;
+
+            for (int i = 0; i < fallback.size(); i++) {
+                result.times.add(start + i * step);
+                result.values.add(fallback.get(i));
+            }
+        }
+
+        return result;
     }
 
     private List<Float> readHistory(String raw) {
@@ -895,55 +1075,61 @@ public class MainActivity extends Activity {
         return result;
     }
 
+    private ScrollView pageScroll() {
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(pageBg);
+        scroll.setClipToPadding(false);
+        return scroll;
+    }
+
+    private LinearLayout pageRoot() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(8), dp(18), dp(24));
+        return root;
+    }
+
     private LinearLayout card(boolean gradient) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(18), dp(18), dp(18), dp(18));
-        card.setElevation(dp(4));
+        card.setElevation(dp(3));
 
         GradientDrawable background;
 
         if (gradient) {
             background = new GradientDrawable(
                     GradientDrawable.Orientation.TL_BR,
-                    new int[]{0xFFFFFFFF, 0xFFF2FCFF}
+                    darkMode
+                            ? new int[]{0xFF0B1927, 0xFF0D2435}
+                            : new int[]{0xFFFFFFFF, 0xFFF2FCFF}
             );
             background.setCornerRadius(dp(24));
-            background.setStroke(dp(1), 0xFFE3EDF7);
+            background.setStroke(dp(1), border);
         } else {
-            background = roundedWithStroke(
-                    Color.WHITE,
-                    0xFFE3EDF7,
-                    24
-            );
+            background = roundedWithStroke(surface, border, 24);
         }
 
         card.setBackground(background);
         return card;
     }
 
-    private LinearLayout sectionHeader(
-            int iconRes,
-            String title,
-            String subtitle,
-            TextView chevron
-    ) {
+    private LinearLayout sectionHeader(int iconRes, String title, String subtitle) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
         ImageView icon = circleIcon(iconRes);
-        row.addView(
-                icon,
-                new LinearLayout.LayoutParams(dp(48), dp(48))
-        );
+        row.addView(icon, new LinearLayout.LayoutParams(dp(46), dp(46)));
 
         LinearLayout texts = new LinearLayout(this);
         texts.setOrientation(LinearLayout.VERTICAL);
-        texts.setPadding(dp(10), 0, dp(8), 0);
-        texts.addView(text(title, 18, true, 0xFF0B1D3D));
+        texts.setPadding(dp(10), 0, 0, 0);
+
+        texts.addView(text(title, 17, true, textPrimary));
         texts.addView(
-                text(subtitle, 11, false, 0xFF7186A1),
+                text(subtitle, 11, false, textSecondary),
                 wrapTop(2)
         );
 
@@ -956,19 +1142,49 @@ public class MainActivity extends Activity {
                 )
         );
 
-        chevron.setGravity(Gravity.CENTER);
+        return row;
+    }
+
+    private View settingSwitchRow(
+            int iconRes,
+            String title,
+            String subtitle,
+            Switch control
+    ) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView icon = circleIcon(iconRes);
+        row.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.setPadding(dp(10), 0, dp(8), 0);
+
+        labels.addView(text(title, 14, true, textPrimary));
+        labels.addView(text(subtitle, 11, false, textSecondary), wrapTop(2));
+
         row.addView(
-                chevron,
-                new LinearLayout.LayoutParams(dp(34), dp(40))
+                labels,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        1f
+                )
         );
 
+        row.addView(control, new LinearLayout.LayoutParams(dp(58), dp(44)));
         return row;
     }
 
     private ImageView circleIcon(int res) {
         ImageView icon = new ImageView(this);
-        icon.setPadding(dp(11), dp(11), dp(11), dp(11));
-        icon.setBackground(rounded(0xFFE4F2FF, 50));
+        icon.setPadding(dp(10), dp(10), dp(10), dp(10));
+        icon.setBackground(rounded(
+                darkMode ? 0xFF0B2A45 : 0xFFE4F2FF,
+                50
+        ));
 
         Drawable drawable = getDrawable(res);
 
@@ -984,15 +1200,13 @@ public class MainActivity extends Activity {
     private EditText field(String hint, int inputType) {
         EditText editText = new EditText(this);
         editText.setHint(hint);
-        editText.setHintTextColor(0xFF8DA0B8);
-        editText.setTextColor(0xFF142847);
+        editText.setHintTextColor(textMuted);
+        editText.setTextColor(textPrimary);
         editText.setTextSize(17);
         editText.setSingleLine(true);
         editText.setInputType(inputType);
         editText.setPadding(dp(14), 0, dp(14), 0);
-        editText.setBackground(
-                roundedWithStroke(FIELD_BG, BORDER, 16)
-        );
+        editText.setBackground(roundedWithStroke(fieldBg, border, 16));
         editText.setMinHeight(dp(58));
         return editText;
     }
@@ -1001,19 +1215,16 @@ public class MainActivity extends Activity {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(12), dp(9), dp(12), dp(8));
-        box.setBackground(
-                roundedWithStroke(FIELD_BG, BORDER, 16)
-        );
+        box.setBackground(roundedWithStroke(fieldBg, border, 16));
 
-        box.addView(text(label, 11, true, 0xFF5B7190));
+        box.addView(text(label + " (mg/dL)", 11, true, textSecondary));
 
         EditText value = new EditText(this);
         value.setInputType(
-                InputType.TYPE_CLASS_NUMBER
-                        | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL
         );
-        value.setTextSize(22);
-        value.setTextColor(0xFF142847);
+        value.setTextSize(21);
+        value.setTextColor(textPrimary);
         value.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         value.setSingleLine(true);
         value.setBackgroundColor(Color.TRANSPARENT);
@@ -1024,22 +1235,45 @@ public class MainActivity extends Activity {
         return box;
     }
 
-    private TextView text(
-            String value,
-            int sp,
-            boolean bold,
-            int color
-    ) {
-        TextView textView = new TextView(this);
-        textView.setText(value);
-        textView.setTextSize(sp);
-        textView.setTextColor(color);
+    private Button primaryButton(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(15);
+        button.setTextColor(Color.WHITE);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setBackground(gradientButton());
+        return button;
+    }
+
+    private Button secondaryButton(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(14);
+        button.setTextColor(BLUE);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+        button.setBackground(roundedWithStroke(
+                Color.TRANSPARENT,
+                darkMode ? 0xFF285578 : 0xFF84BEF5,
+                16
+        ));
+        return button;
+    }
+
+    private TextView text(String value, int sp, boolean bold, int color) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(sp);
+        view.setTextColor(color);
 
         if (bold) {
-            textView.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            view.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         }
 
-        return textView;
+        return view;
     }
 
     private GradientDrawable rounded(int color, int radiusDp) {
@@ -1049,11 +1283,7 @@ public class MainActivity extends Activity {
         return drawable;
     }
 
-    private GradientDrawable roundedWithStroke(
-            int color,
-            int strokeColor,
-            int radiusDp
-    ) {
+    private GradientDrawable roundedWithStroke(int color, int strokeColor, int radiusDp) {
         GradientDrawable drawable = rounded(color, radiusDp);
         drawable.setStroke(dp(1), strokeColor);
         return drawable;
@@ -1062,7 +1292,7 @@ public class MainActivity extends Activity {
     private GradientDrawable gradientButton() {
         GradientDrawable drawable = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xFF18A9E8, 0xFF0878E8, 0xFF0752BB}
+                new int[]{0xFF19B5E8, 0xFF148DFF, 0xFF0C67D8}
         );
         drawable.setCornerRadius(dp(18));
         return drawable;
@@ -1086,10 +1316,7 @@ public class MainActivity extends Activity {
         return params;
     }
 
-    private LinearLayout.LayoutParams fullHeightTop(
-            int heightDp,
-            int topDp
-    ) {
+    private LinearLayout.LayoutParams fullHeightTop(int heightDp, int topDp) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dp(heightDp)
@@ -1099,9 +1326,7 @@ public class MainActivity extends Activity {
     }
 
     private int dp(float value) {
-        return Math.round(
-                value * getResources().getDisplayMetrics().density
-        );
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private void startServiceCompat(Intent intent) {
@@ -1141,6 +1366,7 @@ public class MainActivity extends Activity {
         if (Math.rint(value) == value) {
             return String.format(Locale.US, "%.0f", value);
         }
+
         return String.format(Locale.US, "%.1f", value);
     }
 
@@ -1153,6 +1379,7 @@ public class MainActivity extends Activity {
 
     private static String ageText(long ageMs) {
         long minutes = Math.max(0L, ageMs / 60_000L);
+
         if (minutes <= 0L) return "< 1 Min.";
         if (minutes == 1L) return "1 Min.";
         return minutes + " Min.";
@@ -1173,5 +1400,10 @@ public class MainActivity extends Activity {
     protected void onPause() {
         handler.removeCallbacks(refreshUi);
         super.onPause();
+    }
+
+    private static final class HistoryData {
+        final List<Long> times = new ArrayList<>();
+        final List<Float> values = new ArrayList<>();
     }
 }
