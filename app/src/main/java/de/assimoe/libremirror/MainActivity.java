@@ -1378,7 +1378,7 @@ public class MainActivity extends Activity {
         metricApiView.setText(String.valueOf(metrics.apiRequests));
         metricWakeupsView.setText(String.valueOf(metrics.wakeups));
         metricFailuresView.setText(
-                metrics.failures + " / " + Math.max(0, metrics.syncs - metrics.successes)
+                metrics.failures + " / " + metrics.retries
         );
         metricDurationView.setText(
                 metrics.lastDurationMs > 0L
