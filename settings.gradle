@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = 'LibreMirror'
-include ':app'
+include ':app', ':wear'
