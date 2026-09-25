@@ -207,6 +207,14 @@ public final class LibreApiClient {
     }
 
     private FetchResult fetchAuthenticated() throws Exception {
+        if (patientId != null && !patientId.isEmpty()) {
+            try {
+                return fetchGraph(patientId, "");
+            } catch (MissingConnectionException ignored) {
+                patientId = null;
+            }
+        }
+
         ConnectionChoice choice = fetchConnections();
 
         if (choice.patientId == null || choice.patientId.isEmpty()) {
@@ -217,16 +225,24 @@ public final class LibreApiClient {
         }
 
         patientId = choice.patientId;
+        return fetchGraph(patientId, choice.patientName);
+    }
 
+    private FetchResult fetchGraph(String targetPatientId, String fallbackPatientName)
+            throws Exception {
         Response response = request(
                 "GET",
-                baseUrl + "/llu/connections/" + patientId + "/graph",
+                baseUrl + "/llu/connections/" + targetPatientId + "/graph",
                 null,
                 true
         );
 
         if (response.httpCode == 401 || response.httpCode == 403) {
             throw new AuthorizationException();
+        }
+
+        if (response.httpCode == 400 || response.httpCode == 404) {
+            throw new MissingConnectionException();
         }
 
         if (response.httpCode == 429) {
@@ -248,11 +264,16 @@ public final class LibreApiClient {
         }
 
         List<Reading> readings = new ArrayList<>();
-
         JSONObject connection = data.optJSONObject("connection");
         Reading current = null;
 
+        String patientName = fallbackPatientName == null ? "" : fallbackPatientName;
+
         if (connection != null) {
+            if (patientName.isEmpty()) {
+                patientName = connectionName(connection);
+            }
+
             current = parseReading(connection.optJSONObject("glucoseMeasurement"));
             if (current != null) readings.add(current);
         }
@@ -266,16 +287,25 @@ public final class LibreApiClient {
         }
 
         if (current == null && !readings.isEmpty()) {
-            current = Collections.max(readings, Comparator.comparingLong(r -> r.timestampMs));
+            current = Collections.max(
+                    readings,
+                    Comparator.comparingLong(r -> r.timestampMs)
+            );
         }
 
         if (current == null) {
-            throw new UserVisibleException("LibreLinkUp liefert aktuell keinen Glukosewert.");
+            throw new UserVisibleException(
+                    "LibreLinkUp liefert aktuell keinen Glukosewert."
+            );
         }
 
         readings = deduplicateAndSort(readings);
 
-        return new FetchResult(current, readings, choice.patientName);
+        return new FetchResult(
+                current,
+                readings,
+                patientName.isEmpty() ? "LibreLinkUp-Freigabe" : patientName
+        );
     }
 
     private ConnectionChoice fetchConnections() throws Exception {
@@ -709,6 +739,9 @@ public final class LibreApiClient {
     }
 
     private static final class AuthorizationException extends Exception {
+    }
+
+    private static final class MissingConnectionException extends Exception {
     }
 
     private static final class ApiException extends Exception {
