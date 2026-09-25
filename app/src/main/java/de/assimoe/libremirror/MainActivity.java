@@ -39,6 +39,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
+import de.assimoe.libremirror.core.SyncStatus;
+
 public class MainActivity extends Activity {
     private static final int BLUE = 0xFF149CFF;
     private static final int CYAN = 0xFF22D3EE;
@@ -1123,6 +1125,12 @@ public class MainActivity extends Activity {
         long syncMs = prefs.getLong("last_success_ms", 0L);
         String patient = prefs.getString("patient_name", "");
         String error = prefs.getString("last_error", "");
+        SyncStatus syncStatus = SyncStatus.fromName(
+                prefs.getString(
+                        "sync_status",
+                        SyncStatus.UNKNOWN_ERROR.name()
+                )
+        );
         boolean enabled = prefs.getBoolean("enabled", false);
 
         double lowValue = parseDouble(prefs.getString("low", "70"), 70.0);
@@ -1138,12 +1146,36 @@ public class MainActivity extends Activity {
             trendLabelView.setText(LibreApiClient.trendLabel(trend));
             historyTrendView.setText(LibreApiClient.arrow(trend));
 
-            if (error.isEmpty() && !stale) {
-                setConnectionChip("●  Verbunden", GREEN, darkMode ? 0xFF113D31 : 0xFFE6F8EF);
-            } else if (stale) {
-                setConnectionChip("●  Wert veraltet", ORANGE, darkMode ? 0xFF3C3116 : 0xFFFFF3D9);
+            if (syncStatus == SyncStatus.ONLINE_OK && !stale) {
+                setConnectionChip(
+                        "●  Verbunden",
+                        GREEN,
+                        darkMode ? 0xFF113D31 : 0xFFE6F8EF
+                );
+            } else if (syncStatus == SyncStatus.SENSOR_STALE || stale) {
+                setConnectionChip(
+                        "●  Sensorwert veraltet",
+                        ORANGE,
+                        darkMode ? 0xFF3C3116 : 0xFFFFF3D9
+                );
+            } else if (syncStatus == SyncStatus.NO_INTERNET) {
+                setConnectionChip(
+                        "●  Offline",
+                        ORANGE,
+                        darkMode ? 0xFF3C3116 : 0xFFFFF3D9
+                );
+            } else if (syncStatus == SyncStatus.RATE_LIMIT) {
+                setConnectionChip(
+                        "●  Rate-Limit",
+                        ORANGE,
+                        darkMode ? 0xFF3C3116 : 0xFFFFF3D9
+                );
             } else {
-                setConnectionChip("●  Letzter Wert", ORANGE, darkMode ? 0xFF3C3116 : 0xFFFFF3D9);
+                setConnectionChip(
+                        "●  " + syncStatus.userLabel(),
+                        ORANGE,
+                        darkMode ? 0xFF3C3116 : 0xFFFFF3D9
+                );
             }
         } else {
             valueView.setText("—");
@@ -1151,7 +1183,11 @@ public class MainActivity extends Activity {
             trendArrowView.setText("→");
             trendLabelView.setText("Kein Wert");
             historyTrendView.setText("→");
-            setConnectionChip("●  Nicht verbunden", RED, darkMode ? 0xFF321C27 : 0xFFFFEBEE);
+            setConnectionChip(
+                    "●  " + (enabled ? syncStatus.userLabel() : "Nicht verbunden"),
+                    enabled && syncStatus != SyncStatus.UNKNOWN_ERROR ? ORANGE : RED,
+                    darkMode ? 0xFF321C27 : 0xFFFFEBEE
+            );
         }
 
         updatedView.setText(syncMs > 0L ? "Sync: " + time(syncMs) : "Sync: —");
