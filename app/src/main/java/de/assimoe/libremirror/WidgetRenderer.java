@@ -35,6 +35,15 @@ final class WidgetRenderer {
         String value = prefs.getString("last_value", "");
         int trend = prefs.getInt("last_trend", 0);
 
+        boolean offlineMode = prefs.getBoolean("offline_mode", true);
+        String cloudStatus = prefs.getString("cloud_status", "");
+        boolean cloudUnavailable = !cloudStatus.isEmpty() && !"ONLINE".equals(cloudStatus);
+
+        if (!offlineMode && cloudUnavailable) {
+            value = "";
+            trend = 0;
+        }
+
         boolean privateMode = prefs.getBoolean("private_mode", false);
         KeyguardManager keyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
         boolean locked = keyguard != null && keyguard.isDeviceLocked();
