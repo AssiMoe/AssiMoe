@@ -1278,9 +1278,18 @@ public class MainActivity extends Activity {
 
         double lowValue = parseDouble(low.getText().toString(), 70.0);
         double highValue = parseDouble(high.getText().toString(), 180.0);
+        double criticalLowValue = parseDouble(
+                criticalLow == null ? "55" : criticalLow.getText().toString(),
+                55.0
+        );
 
         if (lowValue >= highValue) {
             toast("Der niedrige Grenzwert muss unter dem hohen liegen");
+            return;
+        }
+
+        if (criticalLowValue >= lowValue) {
+            toast("Kritisch niedrig muss unter dem normalen Niedrig-Grenzwert liegen");
             return;
         }
 
@@ -1293,7 +1302,27 @@ public class MainActivity extends Activity {
                     .putString("region", String.valueOf(region.getSelectedItem()))
                     .putString("low", formatNumber(lowValue))
                     .putString("high", formatNumber(highValue))
-                    .putBoolean("car_voice", carVoice.isChecked())
+                    .putString("critical_low", formatNumber(criticalLowValue))
+                    .putInt(
+                            "alert_repeat_min",
+                            clampInt(alertRepeat == null ? "" : alertRepeat.getText().toString(), 30, 5, 180)
+                    )
+                    .putInt(
+                            "stale_alert_min",
+                            clampInt(staleMinutes == null ? "" : staleMinutes.getText().toString(), 10, 5, 60)
+                    )
+                    .putBoolean("trend_alerts", trendAlerts != null && trendAlerts.isChecked())
+                    .putBoolean("stale_alerts", staleAlerts != null && staleAlerts.isChecked())
+                    .putBoolean("cloud_alerts", cloudAlerts != null && cloudAlerts.isChecked())
+                    .putBoolean("quiet_hours_enabled", quietHours != null && quietHours.isChecked())
+                    .putString("quiet_start", quietStart == null ? "22:00" : quietStart.getText().toString().trim())
+                    .putString("quiet_end", quietEnd == null ? "07:00" : quietEnd.getText().toString().trim())
+                    .putBoolean("adaptive_sync", adaptiveSync != null && adaptiveSync.isChecked())
+                    .putBoolean("auto_mode_enabled", autoMode != null && autoMode.isChecked())
+                    .putBoolean("auto_mode_manual", false)
+                    .putBoolean("private_mode", privateMode != null && privateMode.isChecked())
+                    .putBoolean("car_voice", carVoice != null && carVoice.isChecked())
+                    .putString("update_manifest_url", updateUrl == null ? "" : updateUrl.getText().toString().trim())
                     .putInt("sync_interval_min", selectedSyncIntervalMinutes())
                     .putBoolean("enabled", true)
                     .remove("session_base_url")
@@ -1555,9 +1584,22 @@ public class MainActivity extends Activity {
         password.setText("");
         low.setText("70");
         high.setText("180");
+        criticalLow.setText("55");
+        alertRepeat.setText("30");
+        staleMinutes.setText("10");
+        quietStart.setText("22:00");
+        quietEnd.setText("07:00");
         region.setSelection(0);
-        setSyncIntervalSelection(1);
+        setSyncIntervalSelection(3);
+        adaptiveSync.setChecked(true);
+        trendAlerts.setChecked(true);
+        staleAlerts.setChecked(true);
+        cloudAlerts.setChecked(true);
+        quietHours.setChecked(false);
+        autoMode.setChecked(false);
+        privateMode.setChecked(false);
         carVoice.setChecked(true);
+        updateUrl.setText("");
 
         LibreMirrorWidgetProvider.updateAll(this);
 
@@ -1583,8 +1625,21 @@ public class MainActivity extends Activity {
 
         low.setText(prefs.getString("low", "70"));
         high.setText(prefs.getString("high", "180"));
+        criticalLow.setText(prefs.getString("critical_low", "55"));
+        alertRepeat.setText(String.valueOf(prefs.getInt("alert_repeat_min", 30)));
+        staleMinutes.setText(String.valueOf(prefs.getInt("stale_alert_min", 10)));
+        trendAlerts.setChecked(prefs.getBoolean("trend_alerts", true));
+        staleAlerts.setChecked(prefs.getBoolean("stale_alerts", true));
+        cloudAlerts.setChecked(prefs.getBoolean("cloud_alerts", true));
+        quietHours.setChecked(prefs.getBoolean("quiet_hours_enabled", false));
+        quietStart.setText(prefs.getString("quiet_start", "22:00"));
+        quietEnd.setText(prefs.getString("quiet_end", "07:00"));
+        adaptiveSync.setChecked(prefs.getBoolean("adaptive_sync", true));
+        autoMode.setChecked(prefs.getBoolean("auto_mode_enabled", false));
+        privateMode.setChecked(prefs.getBoolean("private_mode", false));
         carVoice.setChecked(prefs.getBoolean("car_voice", true));
-        setSyncIntervalSelection(prefs.getInt("sync_interval_min", 1));
+        updateUrl.setText(prefs.getString("update_manifest_url", ""));
+        setSyncIntervalSelection(prefs.getInt("sync_interval_min", 3));
 
         if (prefs.getBoolean("enabled", false)) {
             startServiceCompat(new Intent(this, LibreService.class));
@@ -2013,6 +2068,15 @@ public class MainActivity extends Activity {
                     new String[]{Manifest.permission.POST_NOTIFICATIONS},
                     10
             );
+        }
+    }
+
+    private static int clampInt(String value, int fallback, int min, int max) {
+        try {
+            int parsed = Integer.parseInt(value == null ? "" : value.trim());
+            return Math.max(min, Math.min(max, parsed));
+        } catch (Exception ignored) {
+            return fallback;
         }
     }
 
