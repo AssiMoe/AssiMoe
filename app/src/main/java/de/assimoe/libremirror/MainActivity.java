@@ -1661,7 +1661,8 @@ public class MainActivity extends Activity {
         double highValue = parseDouble(prefs.getString("high", "180"), 180.0);
 
         long now = System.currentTimeMillis();
-        boolean stale = sensorMs > 0L && now - sensorMs > 5L * 60L * 1000L;
+        int staleMin = prefs.getInt("stale_alert_min", 10);
+        boolean stale = sensorMs > 0L && now - sensorMs > staleMin * 60L * 1000L;
 
         if (!value.isEmpty()) {
             valueView.setText(value);
@@ -1699,7 +1700,7 @@ public class MainActivity extends Activity {
 
         patientView.setText(patient.isEmpty() ? "Freigabe: —" : "Freigabe: " + patient);
 
-        int syncMinutes = prefs.getInt("sync_interval_min", 1);
+        int syncMinutes = prefs.getInt("sync_interval_min", 3);
         serviceStatusView.setText(
                 enabled
                         ? "Live-Dienst: aktiv • alle " + syncIntervalLabel(syncMinutes)
@@ -1733,6 +1734,106 @@ public class MainActivity extends Activity {
                 (float) lowValue,
                 (float) highValue
         );
+
+        renderStatistics(prefs, lowValue, highValue);
+    }
+
+    private void renderStatistics(
+            SharedPreferences prefs,
+            double lowValue,
+            double highValue
+    ) {
+        if (statsTodayView == null) return;
+
+        long now = System.currentTimeMillis();
+        long todayStart = StatsCalculator.startOfDay(now, 0);
+        long tomorrowStart = StatsCalculator.startOfDay(now, 1);
+        long yesterdayStart = StatsCalculator.startOfDay(now, -1);
+        long weekStart = now - 7L * 24L * 60L * 60L * 1000L;
+
+        HistoryDatabase db = new HistoryDatabase(this);
+
+        StatsCalculator.Summary today = StatsCalculator.summarize(
+                db.query(todayStart, tomorrowStart),
+                lowValue,
+                highValue
+        );
+
+        StatsCalculator.Summary yesterday = StatsCalculator.summarize(
+                db.query(yesterdayStart, todayStart),
+                lowValue,
+                highValue
+        );
+
+        StatsCalculator.Summary week = StatsCalculator.summarize(
+                db.query(weekStart, now + 1L),
+                lowValue,
+                highValue
+        );
+
+        statsTodayView.setText(formatSummary(today));
+
+        if (yesterday.samples > 0) {
+            statsYesterdayView.setText("Gestern\n" + formatSummary(yesterday));
+        } else {
+            statsYesterdayView.setText("Gestern: noch keine Daten");
+        }
+
+        if (today.samples > 0 && yesterday.samples > 0) {
+            double avgDiff = today.average - yesterday.average;
+            double tirDiff = today.timeInRangePercent - yesterday.timeInRangePercent;
+
+            statsComparisonView.setText(
+                    "Ø " + signed(avgDiff) + " mg/dL • Zielbereich "
+                            + signed(tirDiff) + " %-Punkte"
+            );
+        } else {
+            statsComparisonView.setText("Vergleich: noch nicht genug Daten");
+        }
+
+        statsWeekView.setText(formatSummary(week));
+
+        int minutes = prefs.getInt("sync_interval_min", 3);
+        boolean adaptive = prefs.getBoolean("adaptive_sync", true);
+        int theoretical = Math.max(1, 1440 / Math.max(1, minutes));
+        int attempts = prefs.getInt("sync_attempts_today", 0);
+        long duration = prefs.getLong("last_poll_duration_ms", 0L);
+
+        batteryDashboardView.setText(
+                "Basisintervall: " + syncIntervalLabel(minutes)
+                        + "\nAdaptive Aktualisierung: " + (adaptive ? "aktiv" : "aus")
+                        + "\nMax. geplante Syncs/Tag: ca. " + theoretical
+                        + "\nHeute ausgeführt: " + attempts
+                        + "\nLetzte Sync-Dauer: " + duration + " ms"
+        );
+
+        String cloud = prefs.getString("cloud_status_text", "Noch nicht geprüft");
+        cloudStatusView.setText("Cloud: " + cloud);
+
+        String cloudCode = prefs.getString("cloud_status", "");
+        cloudStatusView.setTextColor(
+                "ONLINE".equals(cloudCode)
+                        ? GREEN
+                        : cloudCode.isEmpty()
+                        ? textSecondary
+                        : ORANGE
+        );
+    }
+
+    private String formatSummary(StatsCalculator.Summary summary) {
+        if (summary == null || summary.samples <= 0) {
+            return "Noch keine Daten.";
+        }
+
+        return "Ø " + formatNumber(summary.average) + " mg/dL"
+                + "\nMin " + formatNumber(summary.min)
+                + " • Max " + formatNumber(summary.max)
+                + "\nIm Zielbereich " + formatNumber(summary.timeInRangePercent) + " %"
+                + "\nMesswerte " + summary.samples;
+    }
+
+    private String signed(double value) {
+        return (value > 0 ? "+" : "") + formatNumber(value);
     }
 
     private void setConnectionChip(String label, int color, int background) {
