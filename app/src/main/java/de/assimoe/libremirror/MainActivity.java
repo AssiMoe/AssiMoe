@@ -97,6 +97,7 @@ public class MainActivity extends Activity {
     private Switch staleAlerts;
     private Switch cloudAlerts;
     private Switch quietHours;
+    private Switch offlineMode;
     private Switch autoMode;
     private Switch privateMode;
 
@@ -901,6 +902,17 @@ public class MainActivity extends Activity {
                 fullTop(12)
         );
 
+        offlineMode = new Switch(this);
+        card.addView(
+                settingSwitchRow(
+                        R.drawable.ic_live,
+                        "Offline-Modus",
+                        "Bei Internet-/Cloud-Ausfall letzten Wert und Verlauf weiter anzeigen.",
+                        offlineMode
+                ),
+                fullTop(8)
+        );
+
         autoMode = new Switch(this);
         card.addView(
                 settingSwitchRow(
@@ -1318,6 +1330,7 @@ public class MainActivity extends Activity {
                     .putString("quiet_start", quietStart == null ? "22:00" : quietStart.getText().toString().trim())
                     .putString("quiet_end", quietEnd == null ? "07:00" : quietEnd.getText().toString().trim())
                     .putBoolean("adaptive_sync", adaptiveSync != null && adaptiveSync.isChecked())
+                    .putBoolean("offline_mode", offlineMode != null && offlineMode.isChecked())
                     .putBoolean("auto_mode_enabled", autoMode != null && autoMode.isChecked())
                     .putBoolean("auto_mode_manual", false)
                     .putBoolean("private_mode", privateMode != null && privateMode.isChecked())
@@ -1593,6 +1606,7 @@ public class MainActivity extends Activity {
         region.setSelection(0);
         setSyncIntervalSelection(3);
         adaptiveSync.setChecked(true);
+        offlineMode.setChecked(true);
         trendAlerts.setChecked(true);
         staleAlerts.setChecked(true);
         cloudAlerts.setChecked(true);
@@ -1636,6 +1650,7 @@ public class MainActivity extends Activity {
         quietStart.setText(prefs.getString("quiet_start", "22:00"));
         quietEnd.setText(prefs.getString("quiet_end", "07:00"));
         adaptiveSync.setChecked(prefs.getBoolean("adaptive_sync", true));
+        offlineMode.setChecked(prefs.getBoolean("offline_mode", true));
         autoMode.setChecked(prefs.getBoolean("auto_mode_enabled", false));
         privateMode.setChecked(prefs.getBoolean("private_mode", false));
         carVoice.setChecked(prefs.getBoolean("car_voice", true));
