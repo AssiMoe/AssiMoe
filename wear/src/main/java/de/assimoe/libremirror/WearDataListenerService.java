@@ -21,10 +21,24 @@ public class WearDataListenerService extends WearableListenerService {
                     DataMapItem.fromDataItem(event.getDataItem()).getDataMap()
             );
 
-            ComplicationDataSourceUpdateRequester.create(
-                    this,
-                    new ComponentName(this, GlucoseComplicationService.class)
-            ).requestUpdateAll();
+            android.content.SharedPreferences prefs =
+                    getSharedPreferences("libremirror_wear", MODE_PRIVATE);
+            long now = System.currentTimeMillis();
+            long last = prefs.getLong("last_complication_request_ms", 0L);
+
+            if (now - last >= 5L * 60L * 1000L) {
+                try {
+                    ComplicationDataSourceUpdateRequester.create(
+                            this,
+                            new ComponentName(this, GlucoseComplicationService.class)
+                    ).requestUpdateAll();
+
+                    prefs.edit()
+                            .putLong("last_complication_request_ms", now)
+                            .apply();
+                } catch (Exception ignored) {
+                }
+            }
         }
     }
 }
