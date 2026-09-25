@@ -83,7 +83,23 @@ public final class LibreApiClient {
             if (user != null && !user.optString("id", "").isEmpty()) {
                 userId = user.optString("id", "");
             }
-            throw new TermsRequiredException("LibreView-Nutzungsbedingungen müssen bestätigt werden.");
+
+            JSONObject step = data.optJSONObject("step");
+            String stepType = step == null ? "" : step.optString("type", "").toLowerCase(Locale.ROOT);
+
+            if (!"tou".equals(stepType) && !"pp".equals(stepType)) {
+                throw new Exception(
+                        "LibreView verlangt einen unbekannten Kontoschritt"
+                                + (stepType.isEmpty() ? "." : ": " + stepType)
+                );
+            }
+
+            throw new TermsRequiredException(
+                    stepType,
+                    "pp".equals(stepType)
+                            ? "LibreView verlangt eine Datenschutzbestätigung."
+                            : "LibreView-Nutzungsbedingungen müssen bestätigt werden."
+            );
         }
 
         if (data.has("step") && !data.isNull("step")) {
@@ -123,13 +139,36 @@ public final class LibreApiClient {
                 throw new Exception("LibreView hat kein Token für die Bestätigung geliefert.");
             }
 
-            JSONObject response = requestJson("POST", baseUrl + "/auth/continue/tou", null, true);
+            JSONObject response = requestJson(
+                    "POST",
+                    baseUrl + "/auth/continue/" + expected.getStepType(),
+                    null,
+                    true
+            );
             JSONObject data = response.optJSONObject("data");
             if (data == null) {
-                throw new Exception(apiMessage(response, "LibreView konnte die Nutzungsbedingungen nicht bestätigen."));
+                throw new Exception(apiMessage(response, "LibreView konnte den Kontoschritt nicht bestätigen."));
             }
 
             applyAuthTicket(data.optJSONObject("authTicket"));
+
+            if (response.optInt("status", 0) == 4) {
+                JSONObject nextStep = data.optJSONObject("step");
+                String nextType = nextStep == null
+                        ? ""
+                        : nextStep.optString("type", "").toLowerCase(Locale.ROOT);
+
+                if ("tou".equals(nextType) || "pp".equals(nextType)) {
+                    throw new TermsRequiredException(
+                            nextType,
+                            "pp".equals(nextType)
+                                    ? "LibreView verlangt zusätzlich eine Datenschutzbestätigung."
+                                    : "LibreView verlangt zusätzlich die Bestätigung der Nutzungsbedingungen."
+                    );
+                }
+
+                throw new Exception("LibreView verlangt nach der Bestätigung einen unbekannten weiteren Schritt.");
+            }
 
             JSONObject user = data.optJSONObject("user");
             if (user != null && !user.optString("id", "").isEmpty()) {
@@ -388,7 +427,10 @@ public final class LibreApiClient {
         connection.setRequestProperty("Accept", "application/json,text/html,*/*");
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setRequestProperty("Cache-Control", "no-cache");
-        connection.setRequestProperty("User-Agent", "LibreMirror/0.3.2 Android");
+        connection.setRequestProperty("User-Agent", "Mozilla/5.0");
+        connection.setRequestProperty("product", "llu.android");
+        connection.setRequestProperty("version", "4.17.0");
+        connection.setRequestProperty("Pragma", "no-cache");
 
         if (authenticated) {
             connection.setRequestProperty("Authorization", "Bearer " + authToken);
@@ -567,8 +609,15 @@ public final class LibreApiClient {
     }
 
     public static final class TermsRequiredException extends Exception {
-        TermsRequiredException(String message) {
+        private final String stepType;
+
+        TermsRequiredException(String stepType, String message) {
             super(message);
+            this.stepType = stepType;
+        }
+
+        public String getStepType() {
+            return stepType;
         }
     }
 
