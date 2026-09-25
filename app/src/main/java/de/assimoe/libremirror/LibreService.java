@@ -182,10 +182,16 @@ public class LibreService extends Service {
         SharedPreferences prefs = SecurePrefs.prefs(this);
 
         StringBuilder values = new StringBuilder();
+        StringBuilder points = new StringBuilder();
 
         for (LibreApiClient.Reading reading : result.history) {
             if (values.length() > 0) values.append(';');
             values.append(String.format(Locale.US, "%.1f", reading.mgdl));
+
+            if (points.length() > 0) points.append(';');
+            points.append(reading.timestampMs)
+                    .append(',')
+                    .append(String.format(Locale.US, "%.1f", reading.mgdl));
         }
 
         prefs.edit()
@@ -194,6 +200,7 @@ public class LibreService extends Service {
                 .putLong("last_sensor_ms", result.current.timestampMs)
                 .putString("patient_name", result.patientName)
                 .putString("history_values", values.toString())
+                .putString("history_points", points.toString())
                 .apply();
     }
 
