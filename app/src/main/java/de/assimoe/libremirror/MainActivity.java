@@ -130,6 +130,9 @@ public class MainActivity extends Activity {
     private GlucoseChartView compactChart;
     private FullGlucoseChartView fullChart;
 
+    private int currentPage = 0;
+    private long lastStatsRenderMs = 0L;
+
     private static final int REQ_EXPORT_BACKUP = 601;
     private static final int REQ_IMPORT_BACKUP = 602;
 
@@ -1262,6 +1265,7 @@ public class MainActivity extends Activity {
     }
 
     private void showPage(int page) {
+        currentPage = page;
         nowPage.setVisibility(page == 0 ? View.VISIBLE : View.GONE);
         historyPage.setVisibility(page == 1 ? View.VISIBLE : View.GONE);
         statsPage.setVisibility(page == 2 ? View.VISIBLE : View.GONE);
@@ -1271,6 +1275,15 @@ public class MainActivity extends Activity {
         tintNav(navHistoryIcon, navHistoryText, page == 1);
         tintNav(navStatsIcon, navStatsText, page == 2);
         tintNav(navSettingsIcon, navSettingsText, page == 3);
+
+        if (page == 2) {
+            SharedPreferences prefs = SecurePrefs.prefs(this);
+            renderStatistics(
+                    prefs,
+                    parseDouble(prefs.getString("low", "70"), 70.0),
+                    parseDouble(prefs.getString("high", "180"), 180.0)
+            );
+        }
     }
 
     private void tintNav(ImageView icon, TextView label, boolean active) {
@@ -1751,7 +1764,10 @@ public class MainActivity extends Activity {
                 (float) highValue
         );
 
-        renderStatistics(prefs, lowValue, highValue);
+        if (currentPage == 2
+                || System.currentTimeMillis() - lastStatsRenderMs > 60_000L) {
+            renderStatistics(prefs, lowValue, highValue);
+        }
     }
 
     private void renderStatistics(
@@ -1761,6 +1777,7 @@ public class MainActivity extends Activity {
     ) {
         if (statsTodayView == null) return;
 
+        lastStatsRenderMs = System.currentTimeMillis();
         long now = System.currentTimeMillis();
         long todayStart = StatsCalculator.startOfDay(now, 0);
         long tomorrowStart = StatsCalculator.startOfDay(now, 1);
