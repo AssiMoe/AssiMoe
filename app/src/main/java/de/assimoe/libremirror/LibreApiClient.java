@@ -7,8 +7,6 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.InflaterInputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -18,6 +16,8 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.InflaterInputStream;
 
 public final class LibreApiClient {
     private final String configuredRegion;
@@ -41,7 +41,7 @@ public final class LibreApiClient {
         } catch (AuthException e) {
             authToken = null;
             userId = null;
-            tokenExpiresAt = 0;
+            tokenExpiresAt = 0L;
             login(email, password);
             return fetchFromDailyLogReport();
         }
@@ -55,8 +55,8 @@ public final class LibreApiClient {
         payload.put("password", password);
 
         JSONObject response = requestJson("POST", baseUrl + "/auth/login", payload, false);
-
         JSONObject data = response.optJSONObject("data");
+
         if (data != null && data.optBoolean("redirect", false)) {
             String region = data.optString("region", "");
             if (region.isEmpty()) {
@@ -72,60 +72,32 @@ public final class LibreApiClient {
             throw new Exception(apiMessage(response, "LibreView-Login fehlgeschlagen."));
         }
 
-        JSONObject ticket = data.optJSONObject("authTicket");
+        applyAuthTicket(data.optJSONObject("authTicket"));
+
         JSONObject user = data.optJSONObject("user");
-
-        if (ticket == null) {
-            throw new Exception(apiMessage(response, "LibreView hat kein Auth-Ticket geliefert."));
+        if (user != null && !user.optString("id", "").isEmpty()) {
+            userId = user.optString("id", "");
         }
 
-        applyAuthTicket(ticket);
+        throwPendingStepIfNeeded(response, data);
 
-        if (response.optInt("status", 0) == 4) {
-            if (user != null && !user.optString("id", "").isEmpty()) {
-                userId = user.optString("id", "");
-            }
-
-            JSONObject step = data.optJSONObject("step");
-            String stepType = step == null ? "" : step.optString("type", "").toLowerCase(Locale.ROOT);
-
-            if (!"tou".equals(stepType) && !"pp".equals(stepType)) {
-                throw new Exception(
-                        "LibreView verlangt einen unbekannten Kontoschritt"
-                                + (stepType.isEmpty() ? "." : ": " + stepType)
-                );
-            }
-
-            throw new TermsRequiredException(
-                    stepType,
-                    "pp".equals(stepType)
-                            ? "LibreView verlangt eine Datenschutzbestätigung."
-                            : "LibreView-Nutzungsbedingungen müssen bestätigt werden."
-            );
-        }
-
-        if (data.has("step") && !data.isNull("step")) {
-            throw new Exception(
-                    "LibreView verlangt einen weiteren Anmeldeschritt. "
-                            + "Falls nach Bestätigung der Nutzungsbedingungen weiterhin diese Meldung erscheint, "
-                            + "ist wahrscheinlich 2FA/Trusted Device erforderlich."
-            );
-        }
-
-        if (user == null || user.optString("id", "").isEmpty()) {
+        if (userId == null || userId.isEmpty()) {
             JSONObject userResponse = requestJson("GET", baseUrl + "/user", null, true);
             JSONObject userData = userResponse.optJSONObject("data");
+
             if (userData != null) {
                 applyAuthTicket(userData.optJSONObject("authTicket"));
-                user = userData.optJSONObject("user");
+                JSONObject loadedUser = userData.optJSONObject("user");
+                if (loadedUser != null) {
+                    userId = loadedUser.optString("id", "");
+                }
+                throwPendingStepIfNeeded(userResponse, userData);
             }
         }
 
-        if (user == null || user.optString("id", "").isEmpty()) {
+        if (userId == null || userId.isEmpty()) {
             throw new Exception("LibreView hat keine Benutzer-ID für dein persönliches Konto geliefert.");
         }
-
-        userId = user.optString("id", "");
     }
 
     public Reading acceptTermsAndFetch(String email, String password) throws Exception {
@@ -144,9 +116,10 @@ public final class LibreApiClient {
             JSONObject response = requestJson(
                     "POST",
                     baseUrl + "/auth/continue/" + expected.getStepType(),
-                    null,
+                    new JSONObject(),
                     true
             );
+
             JSONObject data = response.optJSONObject("data");
             if (data == null) {
                 throw new Exception(apiMessage(response, "LibreView konnte den Kontoschritt nicht bestätigen."));
@@ -154,44 +127,147 @@ public final class LibreApiClient {
 
             applyAuthTicket(data.optJSONObject("authTicket"));
 
-            if (response.optInt("status", 0) == 4) {
-                JSONObject nextStep = data.optJSONObject("step");
-                String nextType = nextStep == null
-                        ? ""
-                        : nextStep.optString("type", "").toLowerCase(Locale.ROOT);
-
-                if ("tou".equals(nextType) || "pp".equals(nextType)) {
-                    throw new TermsRequiredException(
-                            nextType,
-                            "pp".equals(nextType)
-                                    ? "LibreView verlangt zusätzlich eine Datenschutzbestätigung."
-                                    : "LibreView verlangt zusätzlich die Bestätigung der Nutzungsbedingungen."
-                    );
-                }
-
-                throw new Exception("LibreView verlangt nach der Bestätigung einen unbekannten weiteren Schritt.");
-            }
-
             JSONObject user = data.optJSONObject("user");
             if (user != null && !user.optString("id", "").isEmpty()) {
                 userId = user.optString("id", "");
             }
 
-            if (userId == null || userId.isEmpty()) {
-                JSONObject userResponse = requestJson("GET", baseUrl + "/user", null, true);
-                JSONObject userData = userResponse.optJSONObject("data");
-                if (userData != null) {
-                    applyAuthTicket(userData.optJSONObject("authTicket"));
-                    JSONObject loadedUser = userData.optJSONObject("user");
-                    if (loadedUser != null) userId = loadedUser.optString("id", "");
-                }
-            }
+            throwPendingStepIfNeeded(response, data);
 
-            if (userId == null || userId.isEmpty()) {
-                throw new Exception("LibreView-Bedingungen bestätigt, aber Benutzer-ID fehlt.");
-            }
-
+            ensureUserId();
             return fetchFromDailyLogReport();
+        }
+    }
+
+    public void sendTwoFactorCode() throws Exception {
+        if (authToken == null || authToken.isEmpty()) {
+            throw new Exception("LibreView-2FA kann ohne temporären Login-Token nicht gestartet werden.");
+        }
+
+        JSONObject payload = new JSONObject();
+        payload.put("isPrimaryMethod", false);
+
+        JSONObject response = requestJson(
+                "POST",
+                baseUrl + "/auth/continue/2fa/sendcode",
+                payload,
+                true
+        );
+
+        JSONObject ticket = response.optJSONObject("ticket");
+        if (ticket == null) {
+            JSONObject data = response.optJSONObject("data");
+            if (data != null) ticket = data.optJSONObject("authTicket");
+        }
+
+        applyAuthTicket(ticket);
+
+        if (authToken == null || authToken.isEmpty()) {
+            throw new Exception("LibreView hat nach dem Versand des 2FA-Codes keinen temporären Token geliefert.");
+        }
+    }
+
+    public Reading verifyTwoFactorAndFetch(String code) throws Exception {
+        if (code == null || code.trim().isEmpty()) {
+            throw new Exception("Bitte den LibreView-Bestätigungscode eingeben.");
+        }
+        if (authToken == null || authToken.isEmpty()) {
+            throw new Exception("Die LibreView-2FA-Sitzung fehlt oder ist abgelaufen. Bitte Login neu starten.");
+        }
+
+        JSONObject payload = new JSONObject();
+        payload.put("code", code.trim());
+        payload.put("isPrimaryMethod", false);
+
+        JSONObject response = requestJson(
+                "POST",
+                baseUrl + "/auth/continue/2fa/result",
+                payload,
+                true
+        );
+
+        JSONObject data = response.optJSONObject("data");
+        if (data == null) {
+            throw new Exception(apiMessage(response, "LibreView hat den Bestätigungscode nicht akzeptiert."));
+        }
+
+        applyAuthTicket(data.optJSONObject("authTicket"));
+
+        JSONObject user = data.optJSONObject("user");
+        if (user != null && !user.optString("id", "").isEmpty()) {
+            userId = user.optString("id", "");
+        }
+
+        throwPendingStepIfNeeded(response, data);
+        ensureUserId();
+
+        return fetchFromDailyLogReport();
+    }
+
+    public void restoreTwoFactorSession(String token, String restoredBaseUrl) {
+        if (token != null && !token.isEmpty()) {
+            authToken = token;
+            tokenExpiresAt = System.currentTimeMillis() + (15L * 60L * 1000L);
+        }
+        if (restoredBaseUrl != null && !restoredBaseUrl.isEmpty()) {
+            baseUrl = restoredBaseUrl;
+        }
+    }
+
+    public String getAuthToken() {
+        return authToken == null ? "" : authToken;
+    }
+
+    public String getBaseUrl() {
+        return baseUrl == null ? "" : baseUrl;
+    }
+
+    private void throwPendingStepIfNeeded(JSONObject response, JSONObject data) throws Exception {
+        if (data == null) return;
+
+        JSONObject step = data.optJSONObject("step");
+        if (step == null || step == JSONObject.NULL) return;
+
+        String stepType = step.optString("type", "").trim().toLowerCase(Locale.ROOT);
+        if (stepType.isEmpty()) return;
+
+        if ("tou".equals(stepType) || "pp".equals(stepType)) {
+            throw new TermsRequiredException(
+                    stepType,
+                    "pp".equals(stepType)
+                            ? "LibreView verlangt eine Datenschutzbestätigung."
+                            : "LibreView-Nutzungsbedingungen müssen bestätigt werden."
+            );
+        }
+
+        if ("2faverify".equals(stepType)) {
+            throw new TwoFactorRequiredException(
+                    "LibreView verlangt eine Zwei-Faktor-Bestätigung."
+            );
+        }
+
+        throw new Exception(
+                "LibreView verlangt einen unbekannten Kontoschritt: " + stepType
+        );
+    }
+
+    private void ensureUserId() throws Exception {
+        if (userId != null && !userId.isEmpty()) return;
+
+        JSONObject userResponse = requestJson("GET", baseUrl + "/user", null, true);
+        JSONObject userData = userResponse.optJSONObject("data");
+
+        if (userData != null) {
+            applyAuthTicket(userData.optJSONObject("authTicket"));
+            JSONObject user = userData.optJSONObject("user");
+            if (user != null) {
+                userId = user.optString("id", "");
+            }
+            throwPendingStepIfNeeded(userResponse, userData);
+        }
+
+        if (userId == null || userId.isEmpty()) {
+            throw new Exception("LibreView hat nach der Anmeldung keine Benutzer-ID geliefert.");
         }
     }
 
@@ -228,6 +304,7 @@ public final class LibreApiClient {
         body.put("EndDate", now);
         body.put("PatientId", userId);
         body.put("CultureCode", "de-DE");
+        body.put("CultureCodeCommunication", "de-DE");
 
         JSONObject reports = requestJson("POST", baseUrl + "/reports", body, true);
         applyTopLevelTicket(reports);
@@ -239,11 +316,9 @@ public final class LibreApiClient {
         }
 
         JSONObject channels = requestJson("GET", channelUrl, null, true);
-        String pollUrl = "";
         JSONObject channelData = channels.optJSONObject("data");
-        if (channelData != null) {
-            pollUrl = channelData.optString("lp", "");
-        }
+        String pollUrl = channelData == null ? "" : channelData.optString("lp", "");
+
         if (pollUrl.isEmpty()) {
             throw new Exception("LibreView hat keinen Berichtskanal geliefert.");
         }
@@ -307,10 +382,12 @@ public final class LibreApiClient {
             if ("update".equalsIgnoreCase(lastOperation)) {
                 JSONObject args = response.optJSONObject("args");
                 JSONArray urls = args == null ? null : args.optJSONArray("urls");
+
                 if (urls != null) {
                     if (urls.length() > 5 && !urls.optString(5, "").isEmpty()) {
                         return urls.optString(5, "");
                     }
+
                     for (int i = urls.length() - 1; i >= 0; i--) {
                         String candidate = urls.optString(i, "");
                         if (!candidate.isEmpty()) return candidate;
@@ -331,11 +408,13 @@ public final class LibreApiClient {
     private Reading newestReading(JSONObject report) throws Exception {
         JSONObject data = report.optJSONObject("Data");
         JSONArray days = data == null ? null : data.optJSONArray("Days");
+
         if (days == null) {
             throw new Exception("LibreView-Bericht enthält keine Tagesdaten.");
         }
 
         List<ReportPoint> points = new ArrayList<>();
+
         for (int i = 0; i < days.length(); i++) {
             JSONObject day = days.optJSONObject(i);
             if (day == null) continue;
@@ -349,12 +428,12 @@ public final class LibreApiClient {
         ReportPoint latest = null;
         ReportPoint previous = null;
 
-        for (ReportPoint p : points) {
-            if (latest == null || p.timestamp > latest.timestamp) {
+        for (ReportPoint point : points) {
+            if (latest == null || point.timestamp > latest.timestamp) {
                 previous = latest;
-                latest = p;
-            } else if (previous == null || p.timestamp > previous.timestamp) {
-                previous = p;
+                latest = point;
+            } else if (previous == null || point.timestamp > previous.timestamp) {
+                previous = point;
             }
         }
 
@@ -385,9 +464,11 @@ public final class LibreApiClient {
         if (!(node instanceof JSONObject)) return;
 
         JSONObject object = (JSONObject) node;
+
         if (object.has("Value") && object.has("Timestamp")) {
             double value = object.optDouble("Value", Double.NaN);
             long timestamp = object.optLong("Timestamp", 0L);
+
             if (!Double.isNaN(value) && timestamp > 0L) {
                 out.add(new ReportPoint(timestamp, value));
             }
@@ -415,7 +496,9 @@ public final class LibreApiClient {
 
     private JSONObject requestJson(String method, String url, JSONObject body, boolean authenticated) throws Exception {
         String text = requestText(method, url, body, authenticated);
+
         if (text.isEmpty()) return new JSONObject();
+
         try {
             return new JSONObject(text);
         } catch (Exception e) {
@@ -440,6 +523,7 @@ public final class LibreApiClient {
         connection.setRequestProperty("Cache-Control", "no-cache");
         connection.setRequestProperty("User-Agent", "Mozilla/5.0");
         connection.setRequestProperty("Pragma", "no-cache");
+        connection.setRequestProperty("Connection", "keep-alive");
 
         if (authenticated) {
             connection.setRequestProperty("Authorization", "Bearer " + authToken);
@@ -453,11 +537,13 @@ public final class LibreApiClient {
         }
 
         int code = connection.getResponseCode();
+
         InputStream stream = code >= 200 && code < 300
                 ? connection.getInputStream()
                 : connection.getErrorStream();
 
         String contentEncoding = connection.getContentEncoding();
+
         if (stream != null && contentEncoding != null) {
             if ("gzip".equalsIgnoreCase(contentEncoding)) {
                 stream = new GZIPInputStream(stream);
@@ -474,7 +560,10 @@ public final class LibreApiClient {
         }
 
         if (code < 200 || code >= 300) {
-            throw new Exception("LibreView HTTP " + code + (text.isEmpty() ? "" : ": " + compact(text)));
+            throw new Exception(
+                    "LibreView HTTP " + code
+                            + (text.isEmpty() ? "" : ": " + compact(text))
+            );
         }
 
         return text;
@@ -492,6 +581,7 @@ public final class LibreApiClient {
         if (!token.isEmpty()) authToken = token;
 
         long duration = ticket.optLong("duration", 0L);
+
         if (duration > 0L) {
             tokenExpiresAt = System.currentTimeMillis() + duration;
         } else if (authToken != null) {
@@ -501,11 +591,13 @@ public final class LibreApiClient {
 
     private static JSONObject extractWindowReport(String html) throws Exception {
         int marker = html.indexOf("window.report");
+
         if (marker < 0) {
             throw new Exception("LibreView-Bericht konnte nicht gelesen werden: window.report fehlt.");
         }
 
         int start = html.indexOf('{', marker);
+
         if (start < 0) {
             throw new Exception("LibreView-Bericht enthält kein JSON-Objekt.");
         }
@@ -534,6 +626,7 @@ public final class LibreApiClient {
             }
 
             if (ch == '{') depth++;
+
             if (ch == '}') {
                 depth--;
                 if (depth == 0) {
@@ -559,9 +652,13 @@ public final class LibreApiClient {
     }
 
     private static String hostFor(String region) {
-        String r = region == null ? "AUTO" : region.trim().toUpperCase(Locale.ROOT);
-        if ("AUTO".equals(r)) return "https://api.libreview.io";
-        return "https://api-" + r.toLowerCase(Locale.ROOT) + ".libreview.io";
+        String value = region == null ? "AUTO" : region.trim().toUpperCase(Locale.ROOT);
+
+        if ("AUTO".equals(value)) {
+            return "https://api.libreview.io";
+        }
+
+        return "https://api-" + value.toLowerCase(Locale.ROOT) + ".libreview.io";
     }
 
     private static String compact(String value) {
@@ -573,10 +670,14 @@ public final class LibreApiClient {
         if (in == null) return "";
 
         StringBuilder sb = new StringBuilder();
+
         try (BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             String line;
-            while ((line = br.readLine()) != null) sb.append(line);
+            while ((line = br.readLine()) != null) {
+                sb.append(line);
+            }
         }
+
         return sb.toString();
     }
 
@@ -637,6 +738,12 @@ public final class LibreApiClient {
 
         public String getStepType() {
             return stepType;
+        }
+    }
+
+    public static final class TwoFactorRequiredException extends Exception {
+        TwoFactorRequiredException(String message) {
+            super(message);
         }
     }
 
