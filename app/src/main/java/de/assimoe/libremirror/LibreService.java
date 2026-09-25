@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 
 public class LibreService extends Service {
     public static final String ACTION_REFRESH = "de.assimoe.libremirror.REFRESH";
-    public static final String ACTION_JUGGLUCO_READING = "de.assimoe.libremirror.JUGGLUCO_READING";
     private static final String CH_SERVICE = "libremirror_service";
     private static final String CH_GLUCOSE = "libremirror_glucose";
     private static final String CH_ALERTS = "libremirror_alerts";
@@ -49,15 +48,8 @@ public class LibreService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null) {
-            if (ACTION_REFRESH.equals(intent.getAction()) && scheduler != null) {
-                scheduler.execute(this::pollSafely);
-            } else if (ACTION_JUGGLUCO_READING.equals(intent.getAction())) {
-                int mgdl = intent.getIntExtra("mgdl", 0);
-                int trend = intent.getIntExtra("trend", 0);
-                handleDirectVoice(mgdl, trend);
-                updateService("Direkt vom Libre 3 • " + mgdl + " mg/dL " + LibreApiClient.arrow(trend));
-            }
+        if (intent != null && ACTION_REFRESH.equals(intent.getAction()) && scheduler != null) {
+            scheduler.execute(this::pollSafely);
         }
         return START_STICKY;
     }
@@ -71,15 +63,10 @@ public class LibreService extends Service {
 
             SharedPreferences p = SecurePrefs.prefs(this);
 
-            if ("JUGGLUCO".equals(p.getString("source", "JUGGLUCO"))) {
-                directHeartbeat(p);
-                return;
-            }
-
             String email = SecurePrefs.getSecret(this, "email");
             String password = SecurePrefs.getSecret(this, "password");
             if (email.isEmpty() || password.isEmpty()) {
-                saveError("Bitte LibreLinkUp-Zugangsdaten speichern.");
+                saveError("Bitte LibreView-Zugangsdaten speichern.");
                 updateService("Login fehlt");
                 return;
             }
@@ -106,49 +93,6 @@ public class LibreService extends Service {
         } finally {
             if (wl != null && wl.isHeld()) wl.release();
         }
-    }
-
-    private void directHeartbeat(SharedPreferences prefs) {
-        long lastSeen = prefs.getLong("juggluco_last_seen_ms", 0);
-        if (lastSeen <= 0) {
-            updateService("Direktmodus aktiv • warte auf Juggluco");
-            return;
-        }
-
-        long ageMs = System.currentTimeMillis() - lastSeen;
-        long ageMin = Math.max(0, ageMs / 60000L);
-        int mgdl = prefs.getInt("juggluco_last_mgdl", 0);
-        int trend = prefs.getInt("last_trend", 0);
-
-        if (ageMs > 5 * 60 * 1000L) {
-            updateService("Direktmodus • letzter Sensorwert vor " + ageMin + " Min.");
-        } else {
-            updateService("Direkt vom Libre 3 • " + mgdl + " mg/dL " + LibreApiClient.arrow(trend));
-        }
-    }
-
-    private void handleDirectVoice(int mgdl, int trend) {
-        if (mgdl <= 0) return;
-
-        SharedPreferences prefs = SecurePrefs.prefs(this);
-        if (!prefs.getBoolean("car_voice", true) || !isCarMode() || !ttsReady) return;
-
-        double low = parseDouble(prefs.getString("low", "70"), 70);
-        double high = parseDouble(prefs.getString("high", "180"), 180);
-        String state = mgdl < low ? "LOW" : (mgdl > high ? "HIGH" : "OK");
-        String previous = prefs.getString("voice_alert_state", "");
-
-        if ("OK".equals(state)) {
-            prefs.edit().putString("voice_alert_state", "OK").apply();
-            return;
-        }
-        if (state.equals(previous)) return;
-
-        prefs.edit().putString("voice_alert_state", state).apply();
-
-        String spoken = ("LOW".equals(state) ? "Glukose niedrig. " : "Glukose hoch. ")
-                + mgdl + " Milligramm pro Deziliter";
-        tts.speak(spoken, TextToSpeech.QUEUE_FLUSH, null, "libremirror-direct-alert");
     }
 
     private void appendHistory(SharedPreferences prefs, LibreApiClient.Reading reading) {
