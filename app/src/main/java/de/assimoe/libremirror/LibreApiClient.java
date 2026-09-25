@@ -113,11 +113,13 @@ public final class LibreApiClient {
         }
 
         if (login.status == 2) {
-            throw new UserVisibleException("LibreLinkUp hat E-Mail oder Passwort abgelehnt.");
+            throw new AuthenticationException(
+                    "LibreLinkUp hat E-Mail oder Passwort abgelehnt."
+            );
         }
 
         if (login.status == 4) {
-            throw new UserVisibleException(
+            throw new AuthenticationException(
                     "LibreLinkUp verlangt eine Kontobestätigung. Öffne LibreLinkUp einmal, "
                             + "akzeptiere offene Bedingungen bzw. die Einladung und starte LibreMirror danach erneut."
             );
@@ -155,7 +157,15 @@ public final class LibreApiClient {
         }
 
         if (response.httpCode == 401) {
-            throw new UserVisibleException("LibreLinkUp hat die Zugangsdaten abgelehnt.");
+            throw new AuthenticationException(
+                    "LibreLinkUp hat die Zugangsdaten abgelehnt."
+            );
+        }
+
+        if (response.httpCode >= 500) {
+            throw new CloudUnavailableException(
+                    "Abbott Cloud ist vorübergehend nicht erreichbar."
+            );
         }
 
         if (response.httpCode < 200 || response.httpCode >= 300) {
@@ -218,7 +228,7 @@ public final class LibreApiClient {
         ConnectionChoice choice = fetchConnections();
 
         if (choice.patientId == null || choice.patientId.isEmpty()) {
-            throw new UserVisibleException(
+            throw new NoConnectionException(
                     "Keine aktive LibreLinkUp-Freigabe gefunden. "
                             + "Nimm die Einladung einmal in der LibreLinkUp-App an."
             );
@@ -249,6 +259,12 @@ public final class LibreApiClient {
             throw new RateLimitException(
                     "LibreLinkUp begrenzt die Abfragen vorübergehend.",
                     5L * 60L * 1000L
+            );
+        }
+
+        if (response.httpCode >= 500) {
+            throw new CloudUnavailableException(
+                    "Abbott Cloud ist vorübergehend nicht erreichbar."
             );
         }
 
@@ -319,6 +335,12 @@ public final class LibreApiClient {
             throw new RateLimitException(
                     "LibreLinkUp begrenzt die Abfragen vorübergehend.",
                     5L * 60L * 1000L
+            );
+        }
+
+        if (response.httpCode >= 500) {
+            throw new CloudUnavailableException(
+                    "Abbott Cloud ist vorübergehend nicht erreichbar."
             );
         }
 
@@ -724,7 +746,25 @@ public final class LibreApiClient {
     }
 
     public static class UserVisibleException extends Exception {
-        UserVisibleException(String message) {
+        public UserVisibleException(String message) {
+            super(message);
+        }
+    }
+
+    public static final class AuthenticationException extends UserVisibleException {
+        public AuthenticationException(String message) {
+            super(message);
+        }
+    }
+
+    public static final class NoConnectionException extends UserVisibleException {
+        public NoConnectionException(String message) {
+            super(message);
+        }
+    }
+
+    public static final class CloudUnavailableException extends UserVisibleException {
+        public CloudUnavailableException(String message) {
             super(message);
         }
     }
@@ -732,7 +772,7 @@ public final class LibreApiClient {
     public static final class RateLimitException extends UserVisibleException {
         public final long retryAfterMs;
 
-        RateLimitException(String message, long retryAfterMs) {
+        public RateLimitException(String message, long retryAfterMs) {
             super(message);
             this.retryAfterMs = retryAfterMs;
         }
