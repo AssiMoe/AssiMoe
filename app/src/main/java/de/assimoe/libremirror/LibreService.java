@@ -24,6 +24,9 @@ import java.util.concurrent.TimeUnit;
 public class LibreService extends Service {
     public static final String ACTION_REFRESH = "de.assimoe.libremirror.REFRESH";
     public static final String ACTION_ACCEPT_TERMS = "de.assimoe.libremirror.ACCEPT_TERMS";
+    public static final String ACTION_VERIFY_2FA = "de.assimoe.libremirror.VERIFY_2FA";
+    public static final String ACTION_RESEND_2FA = "de.assimoe.libremirror.RESEND_2FA";
+    public static final String EXTRA_2FA_CODE = "two_factor_code";
     private static final String CH_SERVICE = "libremirror_service";
     private static final String CH_GLUCOSE = "libremirror_glucose";
     private static final String CH_ALERTS = "libremirror_alerts";
@@ -54,6 +57,11 @@ public class LibreService extends Service {
                 scheduler.execute(this::pollSafely);
             } else if (ACTION_ACCEPT_TERMS.equals(intent.getAction())) {
                 scheduler.execute(this::acceptTermsSafely);
+            } else if (ACTION_VERIFY_2FA.equals(intent.getAction())) {
+                final String code = intent.getStringExtra(EXTRA_2FA_CODE);
+                scheduler.execute(() -> verifyTwoFactorSafely(code));
+            } else if (ACTION_RESEND_2FA.equals(intent.getAction())) {
+                scheduler.execute(this::resendTwoFactorSafely);
             }
         }
         return START_STICKY;
@@ -67,6 +75,11 @@ public class LibreService extends Service {
             wl.acquire(90000);
 
             SharedPreferences p = SecurePrefs.prefs(this);
+
+            if (p.getBoolean("two_factor_required", false)) {
+                updateService("Warte auf LibreView-2FA-Code");
+                return;
+            }
 
             String email = SecurePrefs.getSecret(this, "email");
             String password = SecurePrefs.getSecret(this, "password");
@@ -88,7 +101,9 @@ public class LibreService extends Service {
                     .putLong("last_fetch_ms", System.currentTimeMillis())
                     .putString("last_error", "")
                     .putBoolean("terms_required", false)
+                    .putBoolean("two_factor_required", false)
                     .remove("terms_step")
+                    .remove("pending_2fa_base_url")
                     .apply();
 
             if (!reading.timestamp.equals(previousSensorTime)) {
@@ -101,10 +116,13 @@ public class LibreService extends Service {
             SecurePrefs.prefs(this).edit()
                     .putBoolean("terms_required", true)
                     .putString("terms_step", e.getStepType())
+                    .putBoolean("two_factor_required", false)
                     .putString("last_error", e.getMessage())
                     .putLong("last_error_ms", System.currentTimeMillis())
                     .apply();
-            updateService("LibreView-Bedingungen müssen bestätigt werden");
+            updateService("LibreView-Kontobestätigung erforderlich");
+        } catch (LibreApiClient.TwoFactorRequiredException e) {
+            beginTwoFactorSafely(e.getMessage());
         } catch (Exception e) {
             saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             updateService("Fehler beim Abruf");
@@ -151,15 +169,144 @@ public class LibreService extends Service {
             SecurePrefs.prefs(this).edit()
                     .putBoolean("terms_required", true)
                     .putString("terms_step", e.getStepType())
+                    .putBoolean("two_factor_required", false)
                     .putString("last_error", e.getMessage())
                     .putLong("last_error_ms", System.currentTimeMillis())
                     .apply();
             updateService("Weiterer LibreView-Kontoschritt erforderlich");
+        } catch (LibreApiClient.TwoFactorRequiredException e) {
+            beginTwoFactorSafely(e.getMessage());
         } catch (Exception e) {
             saveError(e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
             updateService("Bestätigung fehlgeschlagen");
         } finally {
             if (wl != null && wl.isHeld()) wl.release();
+        }
+    }
+
+
+    private void beginTwoFactorSafely(String reason) {
+        try {
+            SharedPreferences prefs = SecurePrefs.prefs(this);
+
+            if (client == null) {
+                throw new Exception("LibreView-2FA konnte nicht gestartet werden, weil die Login-Sitzung fehlt.");
+            }
+
+            client.sendTwoFactorCode();
+
+            SecurePrefs.putSecret(this, "pending_2fa_token", client.getAuthToken());
+            prefs.edit()
+                    .putString("pending_2fa_base_url", client.getBaseUrl())
+                    .putBoolean("two_factor_required", true)
+                    .putBoolean("terms_required", false)
+                    .remove("terms_step")
+                    .putString("last_error",
+                            "LibreView hat einen Bestätigungscode per E-Mail gesendet. Bitte Code unten eingeben.")
+                    .putLong("last_error_ms", System.currentTimeMillis())
+                    .apply();
+
+            updateService("LibreView-2FA-Code wurde angefordert");
+        } catch (Exception e) {
+            saveError(
+                    "2FA-Code konnte nicht angefordert werden: "
+                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())
+            );
+            updateService("2FA-Code konnte nicht angefordert werden");
+        }
+    }
+
+    private void verifyTwoFactorSafely(String code) {
+        PowerManager.WakeLock wl = null;
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LibreMirror:2fa");
+            wl.acquire(90000);
+
+            SharedPreferences prefs = SecurePrefs.prefs(this);
+
+            if (code == null || code.trim().isEmpty()) {
+                saveError("Bitte den LibreView-Bestätigungscode eingeben.");
+                return;
+            }
+
+            if (client == null) {
+                client = new LibreApiClient(prefs.getString("region", "AUTO"));
+            }
+
+            String pendingToken = SecurePrefs.getSecret(this, "pending_2fa_token");
+            String pendingBaseUrl = prefs.getString("pending_2fa_base_url", "");
+
+            if (pendingToken.isEmpty()) {
+                throw new Exception(
+                        "Die 2FA-Sitzung ist nicht mehr vorhanden. Bitte über 'Code erneut senden' einen neuen Code anfordern."
+                );
+            }
+
+            client.restoreTwoFactorSession(pendingToken, pendingBaseUrl);
+            LibreApiClient.Reading reading = client.verifyTwoFactorAndFetch(code.trim());
+
+            String previousSensorTime = prefs.getString("last_sensor_time", "");
+
+            prefs.edit()
+                    .putBoolean("two_factor_required", false)
+                    .putBoolean("terms_required", false)
+                    .remove("terms_step")
+                    .remove("pending_2fa_base_url")
+                    .putString("last_value", reading.displayValue())
+                    .putString("last_unit", reading.unit)
+                    .putInt("last_trend", reading.trend)
+                    .putString("last_sensor_time", reading.timestamp)
+                    .putLong("last_fetch_ms", System.currentTimeMillis())
+                    .putString("last_error", "")
+                    .apply();
+
+            SecurePrefs.putSecret(this, "pending_2fa_token", "");
+
+            if (!reading.timestamp.equals(previousSensorTime)) {
+                appendHistory(prefs, reading);
+            }
+
+            showGlucoseNotification(reading);
+            checkAlert(reading, prefs);
+            updateService("LibreView-2FA bestätigt");
+        } catch (LibreApiClient.TermsRequiredException e) {
+            SecurePrefs.prefs(this).edit()
+                    .putBoolean("two_factor_required", false)
+                    .putBoolean("terms_required", true)
+                    .putString("terms_step", e.getStepType())
+                    .putString("last_error", e.getMessage())
+                    .apply();
+            updateService("Weiterer LibreView-Kontoschritt erforderlich");
+        } catch (Exception e) {
+            saveError(
+                    "2FA-Bestätigung fehlgeschlagen: "
+                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())
+            );
+            updateService("2FA-Bestätigung fehlgeschlagen");
+        } finally {
+            if (wl != null && wl.isHeld()) wl.release();
+        }
+    }
+
+    private void resendTwoFactorSafely() {
+        try {
+            SharedPreferences prefs = SecurePrefs.prefs(this);
+            prefs.edit()
+                    .putBoolean("two_factor_required", false)
+                    .putString("last_error", "")
+                    .remove("pending_2fa_base_url")
+                    .apply();
+
+            SecurePrefs.putSecret(this, "pending_2fa_token", "");
+            client = null;
+
+            pollSafely();
+        } catch (Exception e) {
+            saveError(
+                    "Neuer 2FA-Code konnte nicht angefordert werden: "
+                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())
+            );
         }
     }
 
