@@ -1036,23 +1036,42 @@ public class MainActivity extends Activity {
         }
 
         try {
+            SharedPreferences prefs = SecurePrefs.prefs(this);
+            String newRegion = String.valueOf(region.getSelectedItem());
+            String oldMail = SecurePrefs.getSecret(this, "email");
+            String oldPass = SecurePrefs.getSecret(this, "password");
+            String oldRegion = prefs.getString("region", "AUTO");
+
+            boolean accountChanged =
+                    !mail.equals(oldMail)
+                            || !pass.equals(oldPass)
+                            || !newRegion.equals(oldRegion);
+
             SecurePrefs.putSecret(this, "email", mail);
             SecurePrefs.putSecret(this, "password", pass);
-            SecurePrefs.putSecret(this, "session_token", "");
 
-            SecurePrefs.prefs(this).edit()
-                    .putString("region", String.valueOf(region.getSelectedItem()))
+            SharedPreferences.Editor editor = prefs.edit()
+                    .putString("region", newRegion)
                     .putString("low", formatNumber(lowValue))
                     .putString("high", formatNumber(highValue))
                     .putBoolean("car_voice", carVoice.isChecked())
+                    .putBoolean(
+                            "adaptive_sync_enabled",
+                            adaptiveSyncSwitch == null || adaptiveSyncSwitch.isChecked()
+                    )
                     .putInt("sync_interval_min", selectedSyncIntervalMinutes())
                     .putBoolean("enabled", true)
-                    .remove("session_base_url")
-                    .remove("session_expires_ms")
-                    .remove("session_account_hash")
-                    .remove("session_patient_id")
-                    .putString("last_error", "")
-                    .apply();
+                    .putString("last_error", "");
+
+            if (accountChanged) {
+                SecurePrefs.putSecret(this, "session_token", "");
+                editor.remove("session_base_url")
+                        .remove("session_expires_ms")
+                        .remove("session_account_hash")
+                        .remove("session_patient_id");
+            }
+
+            editor.apply();
 
             stopService(new Intent(this, LibreService.class));
             startServiceCompat(new Intent(this, LibreService.class));
@@ -1202,6 +1221,11 @@ public class MainActivity extends Activity {
         low.setText(prefs.getString("low", "70"));
         high.setText(prefs.getString("high", "180"));
         carVoice.setChecked(prefs.getBoolean("car_voice", true));
+        if (adaptiveSyncSwitch != null) {
+            adaptiveSyncSwitch.setChecked(
+                    prefs.getBoolean("adaptive_sync_enabled", true)
+            );
+        }
         setSyncIntervalSelection(prefs.getInt("sync_interval_min", 1));
 
         if (prefs.getBoolean("enabled", false)) {
@@ -1297,9 +1321,19 @@ public class MainActivity extends Activity {
         patientView.setText(patient.isEmpty() ? "Freigabe: —" : "Freigabe: " + patient);
 
         int syncMinutes = prefs.getInt("sync_interval_min", 1);
+        SyncMetricsStore.Snapshot metrics =
+                SyncMetricsStore.snapshot(this);
+
+        String adaptiveLabel = prefs.getBoolean(
+                "adaptive_sync_enabled",
+                true
+        ) ? " • Adaptiv" : "";
+
         serviceStatusView.setText(
                 enabled
-                        ? "Live-Dienst: aktiv • alle " + syncIntervalLabel(syncMinutes)
+                        ? "Live-Dienst: aktiv • Basis "
+                        + syncIntervalLabel(syncMinutes)
+                        + adaptiveLabel
                         : "Live-Dienst: aus"
         );
         serviceStatusView.setTextColor(enabled ? GREEN : textSecondary);
@@ -1329,6 +1363,67 @@ public class MainActivity extends Activity {
                 historyData.values,
                 (float) lowValue,
                 (float) highValue
+        );
+
+        renderMetrics(metrics, now);
+    }
+
+    private void renderMetrics(
+            SyncMetricsStore.Snapshot metrics,
+            long now
+    ) {
+        if (metricSyncsView == null) return;
+
+        metricSyncsView.setText(String.valueOf(metrics.syncs));
+        metricApiView.setText(String.valueOf(metrics.apiRequests));
+        metricWakeupsView.setText(String.valueOf(metrics.wakeups));
+        metricFailuresView.setText(
+                metrics.failures + " / " + Math.max(0, metrics.syncs - metrics.successes)
+        );
+        metricDurationView.setText(
+                metrics.lastDurationMs > 0L
+                        ? formatDuration(metrics.lastDurationMs)
+                        : "—"
+        );
+
+        if (metrics.nextSyncAtMs > now) {
+            metricNextSyncView.setText(
+                    "in " + ageText(metrics.nextSyncAtMs - now)
+            );
+        } else if (metrics.nextSyncAtMs > 0L) {
+            metricNextSyncView.setText("jetzt");
+        } else {
+            metricNextSyncView.setText("—");
+        }
+
+        metricReasonView.setText(
+                metrics.adaptiveReason == null
+                        || metrics.adaptiveReason.isEmpty()
+                        ? "—"
+                        : metrics.adaptiveReason
+        );
+
+        batteryOptimizationView.setText(
+                metrics.batteryOptimizationIgnored
+                        ? "Nicht eingeschränkt"
+                        : "Android kann begrenzen"
+        );
+        batteryOptimizationView.setTextColor(
+                metrics.batteryOptimizationIgnored
+                        ? GREEN
+                        : ORANGE
+        );
+    }
+
+    private static String formatDuration(long durationMs) {
+        if (durationMs < 1000L) {
+            return durationMs + " ms";
+        }
+
+        return String.format(
+                Locale.getDefault(),
+                "%.1f s",
+                durationMs / 1000.0
         );
     }
 
@@ -1708,12 +1803,18 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        SecurePrefs.prefs(this).edit()
+                .putBoolean("ui_foreground", true)
+                .apply();
         handler.removeCallbacks(refreshUi);
         handler.post(refreshUi);
     }
 
     @Override
     protected void onPause() {
+        SecurePrefs.prefs(this).edit()
+                .putBoolean("ui_foreground", false)
+                .apply();
         handler.removeCallbacks(refreshUi);
         super.onPause();
     }
