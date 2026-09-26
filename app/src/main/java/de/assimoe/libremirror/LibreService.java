@@ -127,6 +127,11 @@ public class LibreService extends Service {
 
             repository.migrateLegacyDataIfNeeded();
 
+            if (!SyncStatusResolver.hasValidatedInternet(this)) {
+                waitingForNetwork = true;
+                throw new SyncStatusResolver.NoInternetException();
+            }
+
             PowerManager powerManager =
                     (PowerManager) getSystemService(POWER_SERVICE);
 
@@ -245,11 +250,14 @@ public class LibreService extends Service {
                         retryAfter,
                         calculateBackoff()
                 );
+                nextReason = "Backoff: Rate-Limit";
+            } else if (status == SyncStatus.NO_INTERNET) {
+                nextDelay = MAX_BACKOFF_MS;
+                nextReason = "Warte auf Netzwerk";
             } else {
                 nextDelay = calculateBackoff();
+                nextReason = "Backoff: " + status.userLabel();
             }
-
-            nextReason = "Backoff: " + status.userLabel();
 
             LibreMirrorWidgetProvider.updateAll(this);
             updateNotificationFromCache(
