@@ -1,0 +1,34 @@
+name: LibreMirror encrypted chat handoff
+
+on:
+  push:
+    branches:
+      - libremirror-chat-handoff-20260926-1828
+    paths:
+      - '.github/workflows/libremirror-chat-handoff.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct encrypted handoff files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cat libremirror-chat-handoff/mobile.* | base64 -d > out/mobile.enc
+          cat libremirror-chat-handoff/wear.* | base64 -d > out/wear.enc
+          test -s out/mobile.enc
+          test -s out/wear.enc
+      - name: Upload encrypted handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: libremirror-2.0.1-encrypted-handoff
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
