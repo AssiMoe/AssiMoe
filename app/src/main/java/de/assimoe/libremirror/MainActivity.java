@@ -93,8 +93,11 @@ public class MainActivity extends Activity {
     private TextView metricWakeupsView;
     private TextView metricFailuresView;
     private TextView metricDurationView;
+    private TextView metricEffectiveIntervalView;
+    private TextView metricLastSuccessView;
     private TextView metricNextSyncView;
     private TextView metricReasonView;
+    private TextView metricServiceView;
     private TextView batteryOptimizationView;
 
     private TextView valueView;
@@ -820,8 +823,11 @@ public class MainActivity extends Activity {
         metricWakeupsView = metricRow(card, "Wakeups seit Mitternacht", "—");
         metricFailuresView = metricRow(card, "Fehler / Retries", "—");
         metricDurationView = metricRow(card, "Letzte Sync-Dauer", "—");
+        metricEffectiveIntervalView = metricRow(card, "Effektives Intervall", "—");
+        metricLastSuccessView = metricRow(card, "Letzter erfolgreicher Sync", "—");
         metricNextSyncView = metricRow(card, "Nächster Sync", "—");
         metricReasonView = metricRow(card, "Aktiver Sync-Grund", "—");
+        metricServiceView = metricRow(card, "Foreground-Dienst", "—");
         batteryOptimizationView = metricRow(card, "Android Akkuoptimierung", "—");
 
         Button batterySettings = secondaryButton("Android Akku-Einstellungen öffnen");
@@ -1386,6 +1392,21 @@ public class MainActivity extends Activity {
                         : "—"
         );
 
+        metricEffectiveIntervalView.setText(
+                metrics.effectiveIntervalMs > 0L
+                        ? formatInterval(metrics.effectiveIntervalMs)
+                        : "—"
+        );
+
+        long lastSuccessMs = SecurePrefs.prefs(this)
+                .getLong("last_success_ms", 0L);
+
+        metricLastSuccessView.setText(
+                lastSuccessMs > 0L
+                        ? ageText(now - lastSuccessMs) + " her"
+                        : "—"
+        );
+
         if (metrics.nextSyncAtMs > now) {
             metricNextSyncView.setText(
                     "in " + ageText(metrics.nextSyncAtMs - now)
@@ -1403,6 +1424,13 @@ public class MainActivity extends Activity {
                         : metrics.adaptiveReason
         );
 
+        metricServiceView.setText(
+                metrics.serviceRunning ? "Aktiv" : "Aus"
+        );
+        metricServiceView.setTextColor(
+                metrics.serviceRunning ? GREEN : textSecondary
+        );
+
         batteryOptimizationView.setText(
                 metrics.batteryOptimizationIgnored
                         ? "Nicht eingeschränkt"
@@ -1413,6 +1441,14 @@ public class MainActivity extends Activity {
                         ? GREEN
                         : ORANGE
         );
+    }
+
+    private static String formatInterval(long intervalMs) {
+        long minutes = Math.max(0L, intervalMs / 60_000L);
+
+        if (minutes <= 0L) return "< 1 Min.";
+        if (minutes == 1L) return "1 Min.";
+        return minutes + " Min.";
     }
 
     private static String formatDuration(long durationMs) {
@@ -1803,9 +1839,18 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        SecurePrefs.prefs(this).edit()
+        SharedPreferences prefs = SecurePrefs.prefs(this);
+        prefs.edit()
                 .putBoolean("ui_foreground", true)
                 .apply();
+
+        if (prefs.getBoolean("enabled", false)
+                && prefs.getBoolean("adaptive_sync_enabled", true)) {
+            Intent refresh = new Intent(this, LibreService.class);
+            refresh.setAction(LibreService.ACTION_REFRESH);
+            startServiceCompat(refresh);
+        }
+
         handler.removeCallbacks(refreshUi);
         handler.post(refreshUi);
     }
