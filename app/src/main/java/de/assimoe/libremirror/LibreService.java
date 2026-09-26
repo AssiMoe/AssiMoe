@@ -55,6 +55,7 @@ public class LibreService extends Service {
     private ConnectivityManager connectivityManager;
     private ConnectivityManager.NetworkCallback networkCallback;
     private volatile boolean waitingForNetwork = false;
+    private volatile boolean networkRefreshRequested = false;
 
     @Override
     public void onCreate() {
@@ -262,6 +263,12 @@ public class LibreService extends Service {
 
             polling.set(false);
 
+            if (networkRefreshRequested) {
+                networkRefreshRequested = false;
+                nextDelay = 0L;
+                nextReason = "Netzwerk wieder verfügbar";
+            }
+
             if (scheduler != null
                     && !scheduler.isShutdown()
                     && SecurePrefs.prefs(this)
@@ -283,6 +290,11 @@ public class LibreService extends Service {
                 if (!waitingForNetwork) return;
 
                 waitingForNetwork = false;
+
+                if (polling.get()) {
+                    networkRefreshRequested = true;
+                    return;
+                }
 
                 if (scheduler != null
                         && !scheduler.isShutdown()
