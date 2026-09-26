@@ -74,6 +74,12 @@ public final class SyncMetricsStore {
         editor.apply();
     }
 
+    public static void setServiceRunning(Context context, boolean running) {
+        prepared(context).edit()
+                .putBoolean(PREFIX + "service_running", running)
+                .apply();
+    }
+
     public static void setSchedule(
             Context context,
             long nextSyncAtMs,
@@ -108,6 +114,7 @@ public final class SyncMetricsStore {
                 prefs.getLong(PREFIX + "next_sync_at_ms", 0L),
                 prefs.getLong(PREFIX + "effective_interval_ms", 0L),
                 prefs.getString(PREFIX + "adaptive_reason", ""),
+                prefs.getBoolean(PREFIX + "service_running", false),
                 ignored
         );
     }
@@ -153,6 +160,7 @@ public final class SyncMetricsStore {
         public final long nextSyncAtMs;
         public final long effectiveIntervalMs;
         public final String adaptiveReason;
+        public final boolean serviceRunning;
         public final boolean batteryOptimizationIgnored;
 
         Snapshot(
@@ -167,6 +175,7 @@ public final class SyncMetricsStore {
                 long nextSyncAtMs,
                 long effectiveIntervalMs,
                 String adaptiveReason,
+                boolean serviceRunning,
                 boolean batteryOptimizationIgnored
         ) {
             this.syncs = syncs;
@@ -180,6 +189,7 @@ public final class SyncMetricsStore {
             this.nextSyncAtMs = nextSyncAtMs;
             this.effectiveIntervalMs = effectiveIntervalMs;
             this.adaptiveReason = adaptiveReason;
+            this.serviceRunning = serviceRunning;
             this.batteryOptimizationIgnored = batteryOptimizationIgnored;
         }
     }
