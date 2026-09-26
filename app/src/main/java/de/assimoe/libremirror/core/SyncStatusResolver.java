@@ -54,6 +54,9 @@ public final class SyncStatusResolver {
             return capabilities != null
                     && capabilities.hasCapability(
                     NetworkCapabilities.NET_CAPABILITY_INTERNET
+            )
+                    && capabilities.hasCapability(
+                    NetworkCapabilities.NET_CAPABILITY_VALIDATED
             );
         } catch (Exception ignored) {
             return true;
