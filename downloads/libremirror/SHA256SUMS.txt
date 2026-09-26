@@ -1,0 +1,2 @@
+e954a5ec1f440ffbf7b24619572bde9ddc995e1826addf5646b5f8a9062630b0  LibreMirror_2.0.0_Mobile.apk
+7f675d54ba78852265e7a7ad178a651ade635fde91fc6a88e2e8332e4b6f64ef  LibreMirror_2.0.0_WearOS.apk
