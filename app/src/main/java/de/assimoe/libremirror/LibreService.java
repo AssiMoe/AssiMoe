@@ -10,6 +10,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
@@ -50,6 +52,9 @@ public class LibreService extends Service {
     private GlucoseRepository repository;
     private int consecutiveFailures = 0;
     private TextToSpeech tts;
+    private ConnectivityManager connectivityManager;
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private volatile boolean waitingForNetwork = false;
 
     @Override
     public void onCreate() {
@@ -57,6 +62,7 @@ public class LibreService extends Service {
 
         repository = GlucoseRepository.get(this);
         SyncMetricsStore.setServiceRunning(this, true);
+        registerNetworkCallback();
 
         createNotificationChannels();
         startForeground(
@@ -205,6 +211,8 @@ public class LibreService extends Service {
             SyncStatus status =
                     SyncStatusResolver.resolve(this, error);
 
+            waitingForNetwork = status == SyncStatus.NO_INTERNET;
+
             String message = messageFor(status, error);
 
             SyncStateStore.set(this, status, message);
@@ -261,6 +269,47 @@ public class LibreService extends Service {
                 scheduleNext(nextDelay, nextReason);
             }
         }
+    }
+
+    private void registerNetworkCallback() {
+        connectivityManager = (ConnectivityManager)
+                getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        if (connectivityManager == null) return;
+
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                if (!waitingForNetwork) return;
+
+                waitingForNetwork = false;
+
+                if (scheduler != null
+                        && !scheduler.isShutdown()
+                        && SecurePrefs.prefs(LibreService.this)
+                        .getBoolean("enabled", false)) {
+                    scheduleNext(0L, "Netzwerk wieder verfügbar");
+                }
+            }
+        };
+
+        try {
+            connectivityManager.registerDefaultNetworkCallback(networkCallback);
+        } catch (Exception ignored) {
+            networkCallback = null;
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (connectivityManager == null || networkCallback == null) return;
+
+        try {
+            connectivityManager.unregisterNetworkCallback(networkCallback);
+        } catch (Exception ignored) {
+        }
+
+        networkCallback = null;
+        connectivityManager = null;
     }
 
     private String messageFor(
@@ -743,6 +792,7 @@ public class LibreService extends Service {
             tts = null;
         }
 
+        unregisterNetworkCallback();
         client = null;
         SyncMetricsStore.setServiceRunning(this, false);
         SyncMetricsStore.setSchedule(this, 0L, "Live-Dienst aus", 0L);
