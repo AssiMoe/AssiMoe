@@ -11,7 +11,8 @@ public final class SyncStatusResolver {
     private SyncStatusResolver() {}
 
     public static SyncStatus resolve(Context context, Exception error) {
-        if (!hasInternet(context)) {
+        if (error instanceof NoInternetException
+                || !hasValidatedInternet(context)) {
             return SyncStatus.NO_INTERNET;
         }
 
@@ -38,7 +39,7 @@ public final class SyncStatusResolver {
         return SyncStatus.UNKNOWN_ERROR;
     }
 
-    private static boolean hasInternet(Context context) {
+    public static boolean hasValidatedInternet(Context context) {
         try {
             ConnectivityManager manager = (ConnectivityManager)
                     context.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -60,6 +61,12 @@ public final class SyncStatusResolver {
             );
         } catch (Exception ignored) {
             return true;
+        }
+    }
+
+    public static final class NoInternetException extends Exception {
+        public NoInternetException() {
+            super("Keine Internetverbindung.");
         }
     }
 }
