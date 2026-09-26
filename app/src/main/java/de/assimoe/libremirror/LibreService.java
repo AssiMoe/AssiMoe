@@ -56,6 +56,7 @@ public class LibreService extends Service {
         super.onCreate();
 
         repository = GlucoseRepository.get(this);
+        SyncMetricsStore.setServiceRunning(this, true);
 
         createNotificationChannels();
         startForeground(
@@ -223,7 +224,7 @@ public class LibreService extends Service {
             SyncMetricsStore.recordFailure(
                     this,
                     durationMs,
-                    consecutiveFailures > 1
+                    true
             );
 
             if (error instanceof LibreApiClient.RateLimitException) {
@@ -743,6 +744,8 @@ public class LibreService extends Service {
         }
 
         client = null;
+        SyncMetricsStore.setServiceRunning(this, false);
+        SyncMetricsStore.setSchedule(this, 0L, "Live-Dienst aus", 0L);
         super.onDestroy();
     }
 
