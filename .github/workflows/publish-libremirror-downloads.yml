@@ -25,16 +25,13 @@ jobs:
         run: |
           set -euo pipefail
           cat downloads/libremirror/wear-b64/chunk* | tr -d '\n\r' | base64 -d > downloads/libremirror/LibreMirror_2.0.0_WearOS.apk
-          echo 'e954a5ec1f440ffbf7b24619572bde9ddc995e1826addf5646b5f8a9062630b0  downloads/libremirror/LibreMirror_2.0.0_Mobile.apk' | sha256sum -c -
-          echo '7f675d54ba78852265e7a7ad178a651ade635fde91fc6a88e2e8332e4b6f64ef  downloads/libremirror/LibreMirror_2.0.0_WearOS.apk' | sha256sum -c -
+          echo "e954a5ec1f440ffbf7b24619572bde9ddc995e1826addf5646b5f8a9062630b0  downloads/libremirror/LibreMirror_2.0.0_Mobile.apk" | sha256sum -c -
+          echo "7f675d54ba78852265e7a7ad178a651ade635fde91fc6a88e2e8332e4b6f64ef  downloads/libremirror/LibreMirror_2.0.0_WearOS.apk" | sha256sum -c -
           unzip -t downloads/libremirror/LibreMirror_2.0.0_Mobile.apk >/dev/null
           unzip -t downloads/libremirror/LibreMirror_2.0.0_WearOS.apk >/dev/null
           rm -f downloads/libremirror/LibreMirror_2.0.0_Mobile.apk.b64
           rm -rf downloads/libremirror/wear-b64
-          cat > downloads/libremirror/SHA256SUMS.txt <<'EOF'
-e954a5ec1f440ffbf7b24619572bde9ddc995e1826addf5646b5f8a9062630b0  LibreMirror_2.0.0_Mobile.apk
-7f675d54ba78852265e7a7ad178a651ade635fde91fc6a88e2e8332e4b6f64ef  LibreMirror_2.0.0_WearOS.apk
-EOF
+          printf '%s\n'             "e954a5ec1f440ffbf7b24619572bde9ddc995e1826addf5646b5f8a9062630b0  LibreMirror_2.0.0_Mobile.apk"             "7f675d54ba78852265e7a7ad178a651ade635fde91fc6a88e2e8332e4b6f64ef  LibreMirror_2.0.0_WearOS.apk"             > downloads/libremirror/SHA256SUMS.txt
 
       - name: Commit public downloads
         shell: bash
