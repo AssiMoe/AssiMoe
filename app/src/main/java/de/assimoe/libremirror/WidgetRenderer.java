@@ -17,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import de.assimoe.libremirror.core.SyncStatus;
+
 final class WidgetRenderer {
     static final int STYLE_MINI = 1;
     static final int STYLE_CLEAN = 2;
@@ -32,7 +34,12 @@ final class WidgetRenderer {
         String value = prefs.getString("last_value", "");
         int trend = prefs.getInt("last_trend", 0);
         long sensorMs = prefs.getLong("last_sensor_ms", 0L);
-        String error = prefs.getString("last_error", "");
+        SyncStatus syncStatus = SyncStatus.fromName(
+                prefs.getString(
+                        "sync_status",
+                        SyncStatus.UNKNOWN_ERROR.name()
+                )
+        );
         double low = parseDouble(prefs.getString("low", "70"), 70.0);
         double high = parseDouble(prefs.getString("high", "180"), 180.0);
         boolean dark = prefs.getBoolean("dark_mode", true);
@@ -42,13 +49,22 @@ final class WidgetRenderer {
 
         String arrow = LibreApiClient.arrow(trend);
         String display = value.isEmpty() ? "—" : value;
+        long now = System.currentTimeMillis();
+        long ageMs = sensorMs > 0L
+                ? Math.max(0L, now - sensorMs)
+                : 0L;
+
         String age = value.isEmpty()
                 ? "Noch kein Glukosewert"
                 : sensorMs > 0L
-                ? "vor " + ageText(System.currentTimeMillis() - sensorMs)
+                ? "vor " + ageText(ageMs)
                 : "LibreMirror";
 
-        String status = error.isEmpty() ? age : "Letzter Wert • Verbindung prüfen";
+        boolean stale = sensorMs > 0L
+                && ageMs > 5L * 60L * 1000L;
+
+        String status = widgetStatus(syncStatus, stale, age);
+        boolean degraded = syncStatus != SyncStatus.ONLINE_OK || stale;
 
         if (style == STYLE_MINI) {
             views.setTextViewText(R.id.widget_value, display);
@@ -88,7 +104,10 @@ final class WidgetRenderer {
 
             if (Double.isNaN(numeric)) {
                 background = R.drawable.widget_alert_neutral;
-                label = "Kein Wert";
+                label = "KEIN WERT";
+            } else if (degraded) {
+                background = R.drawable.widget_alert_neutral;
+                label = alertStatusLabel(syncStatus, stale);
             } else if (numeric < low) {
                 background = R.drawable.widget_alert_low;
                 label = "NIEDRIG";
@@ -120,6 +139,59 @@ final class WidgetRenderer {
 
         views.setOnClickPendingIntent(R.id.widget_root, pending);
         manager.updateAppWidget(appWidgetId, views);
+    }
+
+    private static String widgetStatus(
+            SyncStatus status,
+            boolean stale,
+            String age
+    ) {
+        if (stale || status == SyncStatus.SENSOR_STALE) {
+            return "VERALTET • " + age;
+        }
+
+        switch (status) {
+            case ONLINE_OK:
+                return age;
+            case NO_INTERNET:
+                return "OFFLINE • " + age;
+            case ABBOTT_UNREACHABLE:
+                return "CLOUD NICHT ERREICHBAR • " + age;
+            case AUTH_EXPIRED:
+                return "ANMELDUNG NÖTIG • " + age;
+            case NO_CONNECTION:
+                return "KEINE FREIGABE • " + age;
+            case RATE_LIMIT:
+                return "RATE-LIMIT • " + age;
+            case UNKNOWN_ERROR:
+            default:
+                return "LETZTER WERT • " + age;
+        }
+    }
+
+    private static String alertStatusLabel(
+            SyncStatus status,
+            boolean stale
+    ) {
+        if (stale || status == SyncStatus.SENSOR_STALE) {
+            return "VERALTET";
+        }
+
+        switch (status) {
+            case NO_INTERNET:
+                return "OFFLINE";
+            case ABBOTT_UNREACHABLE:
+                return "CLOUD FEHLER";
+            case AUTH_EXPIRED:
+                return "LOGIN NÖTIG";
+            case NO_CONNECTION:
+                return "KEINE FREIGABE";
+            case RATE_LIMIT:
+                return "RATE-LIMIT";
+            case UNKNOWN_ERROR:
+            default:
+                return "LETZTER WERT";
+        }
     }
 
     private static int layoutForStyle(int style) {
