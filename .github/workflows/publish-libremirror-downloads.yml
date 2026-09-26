@@ -1,0 +1,47 @@
+name: Publish LibreMirror 2.0.0 APK downloads
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/publish-libremirror-downloads.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout LibreMirror download branch
+        uses: actions/checkout@v4
+        with:
+          ref: libremirror-v2
+          fetch-depth: 0
+
+      - name: Reconstruct and verify APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat downloads/libremirror/wear-b64/chunk* | tr -d '\n\r' | base64 -d > downloads/libremirror/LibreMirror_2.0.0_WearOS.apk
+          echo 'e954a5ec1f440ffbf7b24619572bde9ddc995e1826addf5646b5f8a9062630b0  downloads/libremirror/LibreMirror_2.0.0_Mobile.apk' | sha256sum -c -
+          echo '7f675d54ba78852265e7a7ad178a651ade635fde91fc6a88e2e8332e4b6f64ef  downloads/libremirror/LibreMirror_2.0.0_WearOS.apk' | sha256sum -c -
+          unzip -t downloads/libremirror/LibreMirror_2.0.0_Mobile.apk >/dev/null
+          unzip -t downloads/libremirror/LibreMirror_2.0.0_WearOS.apk >/dev/null
+          rm -f downloads/libremirror/LibreMirror_2.0.0_Mobile.apk.b64
+          rm -rf downloads/libremirror/wear-b64
+          cat > downloads/libremirror/SHA256SUMS.txt <<'EOF'
+e954a5ec1f440ffbf7b24619572bde9ddc995e1826addf5646b5f8a9062630b0  LibreMirror_2.0.0_Mobile.apk
+7f675d54ba78852265e7a7ad178a651ade635fde91fc6a88e2e8332e4b6f64ef  LibreMirror_2.0.0_WearOS.apk
+EOF
+
+      - name: Commit public downloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A downloads/libremirror
+          git commit -m "Publish verified LibreMirror 2.0.0 APK downloads"
+          git push origin HEAD:libremirror-v2
