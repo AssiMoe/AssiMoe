@@ -1,0 +1,58 @@
+name: Build MHV Control Android APK
+on:
+  push:
+    branches: [mhv-control-halbzeit-v4]
+    paths: ["MHV-Control-Android/**", ".github/workflows/mhv-control-halftime-v4.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+      - name: Generate original MHV launcher icons
+        run: |
+          python -m pip install Pillow
+          python - <<'PYTHON'
+          from pathlib import Path
+          from PIL import Image,ImageOps
+          import base64
+          p=Path('MHV-Control-Android')
+          source=p/'logo_original.png'
+          source.write_bytes(base64.b64decode((p/'logo.b64').read_text().strip()))
+          logo=Image.open(source).convert('RGBA')
+          for density,size in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
+            dest=p/'app/src/main/res'/('mipmap-'+density)
+            dest.mkdir(parents=True,exist_ok=True)
+            out=Image.new('RGBA',(size,size),'#0b2f6b')
+            img=ImageOps.contain(logo,(int(size*.79),int(size*.87)),Image.Resampling.LANCZOS)
+            out.alpha_composite(img,((size-img.width)//2,(size-img.height)//2))
+            out.save(dest/'ic_launcher.png')
+          PYTHON
+      - name: Build debug APK
+        working-directory: MHV-Control-Android
+        run: gradle --no-daemon assembleDebug --stacktrace
+      - name: Rename APK
+        run: cp MHV-Control-Android/app/build/outputs/apk/debug/app-debug.apk MHV-Control-Halbzeit-v4.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MHV-Control-Halbzeit-v4
+          path: MHV-Control-Halbzeit-v4.apk
+          if-no-files-found: error
+      - name: Publish APK release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create mhv-control-halftime-v4.0.0 MHV-Control-Halbzeit-v4.apk --target "$GITHUB_SHA" --title "MHV Control v4 Halbzeit" --notes "MHV Logo, Halbzeit-Szene und native Buttons; bestehendes Control-Panel integriert."
