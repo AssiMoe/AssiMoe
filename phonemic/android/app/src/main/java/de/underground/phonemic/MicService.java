@@ -41,6 +41,7 @@ public final class MicService extends Service {
     public static volatile long packetsSent = 0L;
     public static volatile String error = "";
     public static volatile String destination = "";
+    public static volatile int transportMode = 0;
 
     private volatile boolean requestedStop = false;
     private Thread thread;
@@ -51,7 +52,7 @@ public final class MicService extends Service {
         super.onCreate();
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID,
                 "PhoneMic Mikrofonübertragung", NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Mikrofonübertragung an OBS im lokalen WLAN");
+        channel.setDescription("Mikrofonübertragung an OBS über WLAN oder USB-Tethering");
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
     }
 
@@ -83,6 +84,8 @@ public final class MicService extends Service {
         final int port = intent.getIntExtra("port", 49888);
         final int token = intent.getIntExtra("token", 24681357);
         final int audioMode = intent.getIntExtra("mode", 0);
+        final int transport = intent.getIntExtra("transport", 0);
+        transportMode = transport;
         gain = Math.max(0, Math.min(250, intent.getIntExtra("gain", 100)));
         muted = false;
         requestedStop = false;
@@ -96,7 +99,7 @@ public final class MicService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification note = new Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-                .setContentTitle("PhoneMic sendet")
+                .setContentTitle(transport == 1 ? "PhoneMic sendet über USB" : "PhoneMic sendet über WLAN")
                 .setContentText("Mikrofon an " + destination)
                 .setContentIntent(tap)
                 .setOngoing(true)
@@ -110,12 +113,12 @@ public final class MicService extends Service {
         }
 
         transmitting = true;
-        thread = new Thread(() -> stream(host, port, token, audioMode), "PhoneMic-Audio");
+        thread = new Thread(() -> stream(host, port, token, audioMode, transport), "PhoneMic-Audio");
         thread.start();
         return START_NOT_STICKY;
     }
 
-    private void stream(String host, int port, int token, int mode) {
+    private void stream(String host, int port, int token, int mode, int transport) {
         PowerManager.WakeLock cpuLock = null;
         WifiManager.WifiLock wifiLock = null;
         DatagramSocket socket = null;
@@ -137,7 +140,7 @@ public final class MicService extends Service {
 
             try {
                 WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-                if (wifi != null) {
+                if (wifi != null && transport != 1) {
                     wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF,
                             "PhoneMic:WifiStream");
                     wifiLock.setReferenceCounted(false);
