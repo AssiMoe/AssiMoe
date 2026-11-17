@@ -1,0 +1,8 @@
+name: MHV PhoneCam build
+on:
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo MHV PhoneCam build branch ready
