@@ -12,10 +12,12 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.text.InputFilter;
 import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -38,9 +40,10 @@ public final class MainActivity extends Activity {
     private static final int YELLOW = Color.rgb(233,190,104);
     private static final int RED = Color.rgb(248,141,125);
     private EditText host, port, code;
-    private TextView status, details, gainLabel;
-    private Button startButton, muteButton;
-    private Spinner mode;
+    private TextView status, details, gainLabel, transportGuide, addressLabel;
+    private Button startButton, muteButton, usbSettingsButton, usbSearchButton;
+    private Spinner mode, transport;
+    private int selectedTransport = -1;
     private SeekBar gain;
     private SharedPreferences prefs;
     private boolean permissionPending;
@@ -106,7 +109,7 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(22),dp(28),dp(22),dp(32));
         scroll.addView(root);
         setContentView(scroll);
-        root.addView(label("PhoneMic 1.1",32,TEXT,true));
+        root.addView(label("PhoneMic 1.2",32,TEXT,true));
         root.addView(label("Handy-Mikrofon direkt in OBS Studio",15,MUTED,false),spaced(4));
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -114,16 +117,65 @@ public final class MainActivity extends Activity {
         box.setBackground(background(PANEL,15));
         root.addView(box,spaced(22));
         status = label("Bereit",21,ACCENT,true);
-        details = label("Gleiches WLAN wie dein OBS-PC verwenden.",13,MUTED,false);
+        details = label("WLAN oder USB-Kabel zum OBS-PC verwenden.",13,MUTED,false);
         box.addView(status);
         box.addView(details,spaced(7));
-        host = input("192.168.178.20",prefs.getString("host",""),false);
+        root.addView(label("Verbindung",13,MUTED,false),spaced(20));
+        transport = new Spinner(this);
+        ArrayAdapter<String> transportAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item,
+                new String[]{"WLAN", "USB-Kabel (Tethering)"});
+        transport.setAdapter(transportAdapter);
+        transport.setSelection(prefs.getInt("transport",0));
+        transport.setPadding(dp(12),dp(12),dp(12),dp(12));
+        transport.setBackground(background(PANEL,12));
+        root.addView(transport,spaced(7));
+        transportGuide = label("",13,MUTED,false);
+        root.addView(transportGuide,spaced(10));
+
+        usbSettingsButton = button("USB-Tethering Einstellungen öffnen",YELLOW);
+        root.addView(usbSettingsButton,spaced(12));
+        usbSettingsButton.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent("android.settings.TETHER_SETTINGS"));
+            } catch (Exception e) {
+                try {
+                    startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
+                } catch (Exception ignored) {
+                    Toast.makeText(this,"Unter Einstellungen → Hotspot und Tethering öffnen.",
+                            Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+
+        usbSearchButton = button("OBS-PC über USB automatisch suchen",ACCENT);
+        root.addView(usbSearchButton,spaced(10));
+        usbSearchButton.setOnClickListener(v -> searchUsbPc());
+
+        host = input("192.168.178.20",prefs.getString("host_wifi",prefs.getString("host","")),false);
         port = input("49888",prefs.getString("port","49888"),true);
         code = input("24681357",prefs.getString("code","24681357"),true);
         code.setFilters(new InputFilter[]{new InputFilter.LengthFilter(8)});
-        addInput(root,"IPv4-Adresse deines OBS-PCs",host);
+        addressLabel = label("IPv4-Adresse deines OBS-PCs",13,MUTED,false);
+        root.addView(addressLabel,spaced(17));
+        root.addView(host,spaced(7));
         addInput(root,"UDP-Port in OBS",port);
         addInput(root,"8-stelliger Verbindungscode in OBS",code);
+        transport.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
+                if (selectedTransport == pos) return;
+                if (selectedTransport >= 0) {
+                    prefs.edit().putString(selectedTransport == 1 ? "host_usb" : "host_wifi",
+                            host.getText().toString().trim()).apply();
+                }
+                selectedTransport = pos;
+                host.setText(prefs.getString(pos == 1 ? "host_usb" : "host_wifi",
+                        pos == 1 ? "" : prefs.getString("host","")));
+                updateTransportUI();
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        updateTransportUI();
         root.addView(label("Mikrofonprofil",13,MUTED,false),spaced(18));
         mode = new Spinner(this);
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
@@ -170,11 +222,58 @@ public final class MainActivity extends Activity {
             i.putExtra("mute",!MicService.muted);
             startService(i);
         });
-        root.addView(label("48 kHz · Mono · 16 Bit · WLAN/UDP\n"+
+        root.addView(label("48 kHz · Mono · 16 Bit · WLAN oder USB/UDP\n"+
                 "Die Übertragung bleibt auch mit ausgeschaltetem Bildschirm aktiv. "+
                 "Keine Cloud oder Internetverbindung erforderlich.",12,MUTED,false),spaced(25));
         refresh();
     }
+    private void updateTransportUI() {
+        if (transport == null || transportGuide == null || host == null) return;
+        boolean usb = transport.getSelectedItemPosition() == 1;
+        transportGuide.setText(usb
+                ? "1. Handy mit einem Daten-USB-Kabel am PC anschließen.\n"
+                + "2. Am Handy USB-Tethering einschalten.\n"
+                + "3. OBS öffnen und PC automatisch suchen.\n"
+                + "Falls die Suche scheitert: In Windows Einstellungen → Netzwerk & Internet → "
+                + "Ethernet die IPv4 des neuen USB-Netzwerkadapters ablesen und unten eintragen."
+                : "Handy und OBS-PC müssen über dasselbe lokale Netzwerk erreichbar sein.");
+        usbSettingsButton.setVisibility(usb ? View.VISIBLE : View.GONE);
+        usbSearchButton.setVisibility(usb ? View.VISIBLE : View.GONE);
+        addressLabel.setText(usb ? "IPv4-Adresse des PC-USB-Netzwerkadapters" : "IPv4-Adresse deines OBS-PCs");
+        host.setHint(usb ? "USB-PC automatisch suchen oder IPv4 eingeben" : "z. B. 192.168.178.20");
+    }
+
+    private void searchUsbPc() {
+        if (MicService.transmitting) return;
+        final int p;
+        final int pairing;
+        try {
+            p = Integer.parseInt(port.getText().toString().trim());
+            pairing = Integer.parseInt(code.getText().toString().trim());
+            if (p < 1024 || p > 65535 || pairing < 10000000 || pairing > 99999999)
+                throw new IllegalArgumentException("Port oder Verbindungscode ungültig.");
+        } catch (Exception ex) {
+            Toast.makeText(this, "Zuerst gültigen UDP-Port und 8-stelligen Code eingeben.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        usbSearchButton.setEnabled(false);
+        usbSearchButton.setText("Suche OBS-PC am USB-Kabel ...");
+        new Thread(() -> {
+            UsbDiscovery.Result result = UsbDiscovery.discover(p, pairing);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                usbSearchButton.setText("OBS-PC über USB automatisch suchen");
+                usbSearchButton.setEnabled(!MicService.transmitting);
+                if (result.ip != null) {
+                    host.setText(result.ip);
+                    prefs.edit().putString("host_usb", result.ip).apply();
+                }
+                Toast.makeText(this, result.message, Toast.LENGTH_LONG).show();
+            });
+        }, "PhoneMic-UsbDiscovery").start();
+    }
+
     private void validateAndStart() {
         try {
             String ip=host.getText().toString().trim();
@@ -189,6 +288,8 @@ public final class MainActivity extends Activity {
             if(!secret.matches("[1-9][0-9]{7}")) throw new IllegalArgumentException("Genau 8 Ziffern als Code eingeben.");
             prefs.edit().putString("host",ip).putString("port",String.valueOf(p))
                 .putString("code",secret).putInt("mode",mode.getSelectedItemPosition())
+                .putInt("transport",transport.getSelectedItemPosition())
+                .putString(transport.getSelectedItemPosition() == 1 ? "host_usb" : "host_wifi",ip)
                 .putInt("gain",gain.getProgress()).apply();
             if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED) {
                 permissionPending=true;
@@ -202,6 +303,7 @@ public final class MainActivity extends Activity {
             i.putExtra("token",Integer.parseInt(secret));
             i.putExtra("gain",gain.getProgress());
             i.putExtra("mode",mode.getSelectedItemPosition());
+            i.putExtra("transport",transport.getSelectedItemPosition());
             startForegroundService(i);
             status.setText("Mikrofon startet ...");
         }catch(Exception ex){
@@ -231,6 +333,8 @@ public final class MainActivity extends Activity {
         port.setEnabled(!on);
         code.setEnabled(!on);
         mode.setEnabled(!on);
+        transport.setEnabled(!on);
+        usbSearchButton.setEnabled(!on);
         if(!on) {
             boolean failed=!MicService.error.isEmpty();
             status.setText(failed?"Fehler":"Bereit");
@@ -244,7 +348,7 @@ public final class MainActivity extends Activity {
                 SystemClock.elapsedRealtime()-MicService.lastAck<2400){
             status.setText("Mit OBS verbunden");
             status.setTextColor(ACCENT);
-            details.setText("WLAN verbunden • Gesendete Pakete: "+MicService.packetsSent);
+            details.setText((MicService.transportMode == 1 ? "USB" : "WLAN") + " verbunden • Pakete: "+MicService.packetsSent);
         }else{
             status.setText("Sende ...");
             status.setTextColor(YELLOW);
