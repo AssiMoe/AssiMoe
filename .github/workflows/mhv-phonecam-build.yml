@@ -1,8 +1,113 @@
-name: MHV PhoneCam build
+name: MHV PhoneCam - APK and Windows OBS Plugin
+
 on:
+  push:
+    branches:
+      - build/mhv-phonecam-android-obs-20261117
+    paths:
+      - '.github/workflows/mhv-phonecam-build.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  verify:
+  sources:
     runs-on: ubuntu-24.04
     steps:
-      - run: echo MHV PhoneCam build branch ready
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source decompressor
+        run: python -m pip install --quiet brotli
+      - name: Verify and restore project sources
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import base64, hashlib, brotli, tarfile, io
+          data = ''.join((Path('mhv-phonecam-payload') / f'part{i}.txt').read_text().strip() for i in range(1, 5))
+          assert len(data) == 13484, f"Source length mismatch: {len(data)}"
+          binary = base64.b64decode(data, validate=True)
+          digest = hashlib.sha256(binary).hexdigest()
+          assert digest == '6556bbe2c0b9c86f6311fb4ad0f1866a4efdf5cb07bcd6302fc96a7621097dd5', digest
+          with tarfile.open(fileobj=io.BytesIO(brotli.decompress(binary)), mode='r:') as archive:
+              archive.extractall('.', filter='data')
+          print('PhoneCam source verified and restored')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MHV-PhoneCam-Source-Verified
+          path: |
+            android-app/
+            obs-plugin/
+          retention-days: 7
+          if-no-files-found: error
+
+  android-apk:
+    needs: sources
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MHV-PhoneCam-Source-Verified
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Install Android API 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Compile installable APK
+        run: gradle --no-daemon --project-dir android-app :app:assembleDebug
+      - name: Prepare APK download
+        run: cp android-app/app/build/outputs/apk/debug/app-debug.apk MHV-PhoneCam-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MHV-PhoneCam-Android-APK
+          path: MHV-PhoneCam-Android.apk
+          if-no-files-found: error
+
+  obs-windows-x64:
+    needs: sources
+    runs-on: windows-2022
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MHV-PhoneCam-Source-Verified
+      - name: Prepare official OBS plugin template
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/obsproject/obs-plugintemplate.git obs-template
+          Copy-Item obs-plugin/src/plugin-main.c obs-template/src/plugin-main.c -Force
+          $cfgFile = "obs-template/buildspec.json"
+          $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json
+          $cfg.name = 'mhv-phonecam-obs'
+          $cfg.displayName = 'MHV PhoneCam OBS Source'
+          $cfg.version = '1.0.0'
+          $cfg.author = 'MHV'
+          $cfg.website = 'https://github.com/AssiMoe/AssiMoe'
+          $cfg.email = 'noreply@invalid.local'
+          $cfg | ConvertTo-Json -Depth 20 | Set-Content $cfgFile -Encoding utf8
+      - name: Compile Windows OBS plugin
+        shell: pwsh
+        run: |
+          Push-Location obs-template
+          & ./.github/scripts/Build-Windows.ps1 -Target x64 -Configuration Release
+          if ($LASTEXITCODE -ne 0) { throw "Windows plugin compilation failed with $LASTEXITCODE" }
+          Pop-Location
+      - name: Verify plugin DLL
+        shell: pwsh
+        run: |
+          $dlls = Get-ChildItem 'obs-template/release/Release' -Recurse -Filter '*phonecam*.dll'
+          if (!$dlls -or $dlls.Count -eq 0) { throw 'No PhoneCam plugin DLL produced' }
+          $dlls | ForEach-Object { Write-Host $_.FullName }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MHV-PhoneCam-OBS-Windows-x64
+          path: obs-template/release/Release/
+          if-no-files-found: error
