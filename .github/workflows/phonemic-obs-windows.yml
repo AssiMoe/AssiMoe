@@ -1,0 +1,76 @@
+name: PhoneMic OBS Plugin Windows
+on:
+  push:
+    branches:
+      - phonemic-apk-build
+    paths:
+      - 'phonemic/obs-plugin/**'
+      - '.github/workflows/phonemic-obs-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  obs-windows-x64:
+    name: PhoneMic OBS Windows x64
+    runs-on: windows-2022
+    steps:
+      - name: Checkout PhoneMic
+        uses: actions/checkout@v4
+        with:
+          path: phone-project
+      - name: Checkout official OBS plugin build template
+        uses: actions/checkout@v4
+        with:
+          repository: obsproject/obs-plugintemplate
+          ref: 3e7d7ac3b5342cd7d9b88890b9c70b472d1520fc
+          path: obs-template
+      - name: Configure OBS plugin project
+        shell: pwsh
+        run: |
+          Copy-Item 'phone-project/phonemic/obs-plugin/src/phone-mic.cpp' 'obs-template/src/phone-mic.cpp'
+          Copy-Item 'phone-project/phonemic/obs-plugin/data/locale/*.ini' 'obs-template/data/locale/' -Force
+          $file = 'obs-template/CMakeLists.txt'
+          $cmake = Get-Content -Raw $file
+          $before = 'target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c)'
+          $after = 'target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/phone-mic.cpp)'
+          if (-not $cmake.Contains($before)) { throw 'OBS plugin template CMakeLists.txt changed' }
+          $cmake = $cmake.Replace($before, $after)
+          $cmake += [Environment]::NewLine + 'target_compile_features(${CMAKE_PROJECT_NAME} PRIVATE cxx_std_17)' + [Environment]::NewLine
+          $cmake += 'target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ws2_32)' + [Environment]::NewLine
+          Set-Content -Path $file -Value $cmake -Encoding utf8
+          $spec = Get-Content -Raw 'obs-template/buildspec.json' | ConvertFrom-Json
+          $spec.name = 'phone-mic-obs'
+          $spec.displayName = 'PhoneMic for OBS'
+          $spec.version = '1.0.0'
+          $spec.author = 'PhoneMic Community Project'
+          $spec | ConvertTo-Json -Depth 20 | Set-Content 'obs-template/buildspec.json' -Encoding utf8
+      - name: Compile Windows plugin DLL
+        shell: pwsh
+        working-directory: obs-template
+        run: ./.github/scripts/Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+      - name: Assemble installer ZIP
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem 'obs-template/release' -Recurse -Filter 'phone-mic-obs.dll' | Select-Object -First 1
+          if (-not $dll) { throw 'PhoneMic DLL was not created' }
+          if ($dll.Length -lt 10000) { throw 'PhoneMic DLL appears incomplete' }
+          $root = 'dist'
+          $target = 'dist/phone-mic-obs'
+          New-Item -ItemType Directory -Path "$target/data/locale" -Force | Out-Null
+          Copy-Item $dll.FullName "$target/phone-mic-obs.dll"
+          Copy-Item 'phone-project/phonemic/obs-plugin/data/locale/*.ini' "$target/data/locale/"
+          Copy-Item 'phone-project/phonemic/obs-plugin/install/Installieren.cmd' "$root/Installieren.cmd"
+          Copy-Item 'phone-project/phonemic/obs-plugin/install/Installieren.ps1' "$root/Installieren.ps1"
+          Copy-Item 'phone-project/phonemic/obs-plugin/README.md' "$root/README.md"
+          $hash = (Get-FileHash "$target/phone-mic-obs.dll" -Algorithm SHA256).Hash
+          Write-Host "DLL: $($dll.FullName)"
+          Write-Host "DLL size: $($dll.Length) bytes"
+          Write-Host "SHA256: $hash"
+          Compress-Archive -Path 'dist/*' -DestinationPath 'PhoneMic-OBS-Windows-x64.zip' -Force
+      - name: Upload Windows plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneMic-OBS-Windows-x64
+          path: PhoneMic-OBS-Windows-x64.zip
+          if-no-files-found: error
