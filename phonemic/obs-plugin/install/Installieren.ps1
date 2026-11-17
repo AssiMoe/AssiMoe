@@ -49,11 +49,31 @@ $localeTarget = Join-Path $target 'data\locale'
 New-Item -Path $localeTarget -ItemType Directory -Force | Out-Null
 Copy-Item -Path (Join-Path $plugin 'data\locale\*.ini') -Destination $localeTarget -Force
 
+# Bei USB-Tethering stuft Windows den Adapter oft als "Oeffentlich" ein.
+# Zugelassen ist ausschliesslich das lokale Subnetz auf UDP 49888.
+try {
+    $ruleName = 'PhoneMic-OBS-UDP-49888-LocalSubnet'
+    $rule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+    if (-not $rule) {
+        New-NetFirewallRule -Name $ruleName -DisplayName 'PhoneMic OBS (USB/WLAN lokal)' `
+            -Description 'Nur lokale Netzwerkgeraete duerfen PhoneMic an UDP 49888 erreichen.' `
+            -Direction Inbound -Action Allow -Protocol UDP -LocalPort 49888 `
+            -RemoteAddress LocalSubnet -Profile Any -Enabled True | Out-Null
+    }
+    else {
+        Set-NetFirewallRule -Name $ruleName -Enabled True | Out-Null
+    }
+    Write-Host "Firewall: UDP 49888 nur aus dem lokalen Subnetz freigegeben."
+}
+catch {
+    Write-Warning "Firewallregel konnte nicht gesetzt werden. Bitte UDP 49888 fuer das lokale Subnetz manuell freigeben."
+}
+
 Write-Host ""
 Write-Host "PhoneMic erfolgreich installiert." -ForegroundColor Green
 Write-Host "DLL: $targetDll"
 Write-Host "OBS neu starten und unter Quellen -> + -> PhoneMic die Quelle hinzufuegen."
 Write-Host "Handy und PC: UDP 49888, Verbindungscode 24681357."
-Write-Host "Falls kein Ton: Port 49888/UDP in der Windows-Firewall (Privat) zulassen."
+Write-Host "USB: Kabel anschliessen, USB-Tethering am Handy aktivieren, in PhoneMic USB waehlen."
 Write-Host ""
 Read-Host "Enter zum Schliessen"
