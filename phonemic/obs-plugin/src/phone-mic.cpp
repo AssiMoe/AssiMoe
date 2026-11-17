@@ -274,6 +274,8 @@ void *source_create(obs_data_t *settings, obs_source_t *source)
     mic->port = static_cast<int>(obs_data_get_int(settings, "udp_port"));
     mic->code = static_cast<uint32_t>(obs_data_get_int(settings, "pair_code"));
     mic->buffer_ms = static_cast<int>(obs_data_get_int(settings, "buffer_ms"));
+    if (mic->buffer_ms < 60 || mic->buffer_ms > 300)
+        mic->buffer_ms = 140;
     start_receiver(mic);
     return mic;
 }
@@ -292,7 +294,9 @@ void source_update(void *data, obs_data_t *settings)
         return;
     const auto port = static_cast<int>(obs_data_get_int(settings, "udp_port"));
     const auto code = static_cast<uint32_t>(obs_data_get_int(settings, "pair_code"));
-    const auto buffer_ms = static_cast<int>(obs_data_get_int(settings, "buffer_ms"));
+    int buffer_ms = static_cast<int>(obs_data_get_int(settings, "buffer_ms"));
+    if (buffer_ms < 60 || buffer_ms > 300)
+        buffer_ms = 140;
     if (mic->port == port && mic->code == code && mic->buffer_ms == buffer_ms)
         return;
     stop_receiver(mic);
