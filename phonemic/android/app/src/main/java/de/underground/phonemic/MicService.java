@@ -12,13 +12,17 @@ import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.net.wifi.WifiManager;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.Process;
+import android.os.SystemClock;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.security.SecureRandom;
 
@@ -34,12 +38,13 @@ public final class MicService extends Service {
     public static volatile boolean muted = false;
     public static volatile int gain = 100;
     public static volatile long lastAck = 0L;
+    public static volatile long packetsSent = 0L;
     public static volatile String error = "";
     public static volatile String destination = "";
 
     private volatile boolean requestedStop = false;
     private Thread thread;
-    private AudioRecord recorder;
+    private volatile AudioRecord recorder;
 
     @Override
     public void onCreate() {
@@ -82,6 +87,7 @@ public final class MicService extends Service {
         muted = false;
         requestedStop = false;
         lastAck = 0;
+        packetsSent = 0;
         error = "";
         destination = host + ":" + port;
 
@@ -102,6 +108,7 @@ public final class MicService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+
         transmitting = true;
         thread = new Thread(() -> stream(host, port, token, audioMode), "PhoneMic-Audio");
         thread.start();
@@ -109,16 +116,36 @@ public final class MicService extends Service {
     }
 
     private void stream(String host, int port, int token, int mode) {
-        PowerManager.WakeLock wakeLock = null;
+        PowerManager.WakeLock cpuLock = null;
+        WifiManager.WifiLock wifiLock = null;
         DatagramSocket socket = null;
+        Thread ackThread = null;
         try {
-            InetAddress server = InetAddress.getByName(host);
-            if (!(server instanceof Inet4Address)) throw new IllegalArgumentException("Nur IPv4-Adressen");
+            Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO);
+            final InetAddress server = InetAddress.getByName(host);
+            if (!(server instanceof Inet4Address))
+                throw new IllegalArgumentException("Nur IPv4-Adressen erlaubt");
+
             socket = new DatagramSocket();
-            socket.setSoTimeout(1);
+            socket.setSendBufferSize(256 * 1024);
+            socket.setReceiveBufferSize(16 * 1024);
+            socket.setSoTimeout(300);
+
             PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
-            wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PhoneMic:AudioStream");
-            wakeLock.acquire(4 * 60 * 60 * 1000L);
+            cpuLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "PhoneMic:AudioStream");
+            cpuLock.acquire();
+
+            try {
+                WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+                if (wifi != null) {
+                    wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                            "PhoneMic:WifiStream");
+                    wifiLock.setReferenceCounted(false);
+                    wifiLock.acquire();
+                }
+            } catch (RuntimeException ignored) {
+                // Mic capture continues if a device refuses the optional Wi-Fi lock.
+            }
 
             int source = mode == 1 ? MediaRecorder.AudioSource.UNPROCESSED
                     : MediaRecorder.AudioSource.VOICE_RECOGNITION;
@@ -129,66 +156,101 @@ public final class MicService extends Service {
             }
             int minimum = AudioRecord.getMinBufferSize(MicProtocol.SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-            if (minimum <= 0) throw new IllegalStateException("48 kHz-Mikrofon nicht verfügbar");
+            if (minimum <= 0)
+                throw new IllegalStateException("48 kHz Mikrofon wird nicht unterstützt");
             recorder = new AudioRecord(source, MicProtocol.SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
-                    Math.max(minimum, MicProtocol.PCM_BYTES * 8));
+                    Math.max(minimum, MicProtocol.PCM_BYTES * 12));
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED)
                 throw new IllegalStateException("AudioRecord konnte nicht initialisiert werden");
             recorder.startRecording();
             if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING)
-                throw new IllegalStateException("Mikrofon kann nicht aufgenommen werden");
+                throw new IllegalStateException("Mikrofonaufnahme fehlgeschlagen");
 
-            int session = new SecureRandom().nextInt();
+            final int session = new SecureRandom().nextInt();
+            final DatagramSocket ackSocket = socket;
+            ackThread = new Thread(() -> receiveAcks(ackSocket, server, port, token, session),
+                    "PhoneMic-ACK");
+            ackThread.setDaemon(true);
+            ackThread.start();
+
             byte[] packetBytes = MicProtocol.newFrame(token, session);
             DatagramPacket outgoing = new DatagramPacket(packetBytes, packetBytes.length, server, port);
-            byte[] ackBuffer = new byte[64];
-            DatagramPacket ack = new DatagramPacket(ackBuffer, ackBuffer.length);
             int sequence = 0;
-            while (!requestedStop && !Thread.currentThread().isInterrupted()) {
+
+            while (!requestedStop) {
                 int received = 0;
                 while (received < MicProtocol.PCM_BYTES && !requestedStop) {
                     int count = recorder.read(packetBytes,
                             MicProtocol.HEADER_BYTES + received,
                             MicProtocol.PCM_BYTES - received, AudioRecord.READ_BLOCKING);
-                    if (count < 0) throw new IllegalStateException("Mikrofonfehler: " + count);
+                    if (count < 0) {
+                        if (requestedStop) break;
+                        throw new IllegalStateException("Mikrofon-Lesefehler: " + count);
+                    }
+                    if (count == 0) continue;
                     received += count;
                 }
                 if (requestedStop) break;
                 MicProtocol.setSequence(packetBytes, sequence++);
                 MicProtocol.applyGain(packetBytes, gain, muted);
                 socket.send(outgoing);
-                if (sequence % 5 == 0) {
-                    ack.setLength(ackBuffer.length);
-                    try {
-                        socket.receive(ack);
-                        if (server.equals(ack.getAddress()) && MicProtocol.isAck(ack, token, session))
-                            lastAck = android.os.SystemClock.elapsedRealtime();
-                    } catch (SocketTimeoutException ignored) {
-                    }
-                }
+                packetsSent++;
             }
+
         } catch (Exception exc) {
-            if (!requestedStop) error = exc.getMessage() == null ? "Audiofehler" : exc.getMessage();
+            if (!requestedStop)
+                error = exc.getMessage() == null ? "Übertragung unterbrochen" : exc.getMessage();
         } finally {
+            if (socket != null) socket.close();
             if (recorder != null) {
                 try { recorder.stop(); } catch (Exception ignored) {}
                 recorder.release();
                 recorder = null;
             }
-            if (socket != null) socket.close();
-            if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+            if (ackThread != null) {
+                try { ackThread.join(400); }
+                catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            }
+            if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
+            if (cpuLock != null && cpuLock.isHeld()) cpuLock.release();
             transmitting = false;
             stopSelf();
         }
     }
 
+    private void receiveAcks(DatagramSocket socket, InetAddress server,
+                             int port, int token, int session) {
+        final byte[] bytes = new byte[64];
+        DatagramPacket reply = new DatagramPacket(bytes, bytes.length);
+        while (!requestedStop && !socket.isClosed()) {
+            reply.setLength(bytes.length);
+            try {
+                socket.receive(reply);
+                if (server.equals(reply.getAddress()) && reply.getPort() == port &&
+                        MicProtocol.isAck(reply, token, session)) {
+                    lastAck = SystemClock.elapsedRealtime();
+                }
+            } catch (SocketTimeoutException ignored) {
+            } catch (SocketException e) {
+                break;
+            } catch (Exception ignored) {
+                if (socket.isClosed()) break;
+            }
+        }
+    }
+
     private void stopStreaming() {
         requestedStop = true;
-        Thread t = thread;
-        if (t != null && t != Thread.currentThread()) {
-            t.interrupt();
-            try { t.join(800); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+        AudioRecord audio = recorder;
+        if (audio != null) {
+            try { audio.stop(); } catch (Exception ignored) {}
+        }
+        Thread active = thread;
+        if (active != null && active != Thread.currentThread()) {
+            active.interrupt();
+            try { active.join(1200); }
+            catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
         }
         transmitting = false;
     }
