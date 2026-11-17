@@ -106,7 +106,7 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(22),dp(28),dp(22),dp(32));
         scroll.addView(root);
         setContentView(scroll);
-        root.addView(label("PhoneMic",32,TEXT,true));
+        root.addView(label("PhoneMic 1.1",32,TEXT,true));
         root.addView(label("Handy-Mikrofon direkt in OBS Studio",15,MUTED,false),spaced(4));
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -244,11 +244,11 @@ public final class MainActivity extends Activity {
                 SystemClock.elapsedRealtime()-MicService.lastAck<2400){
             status.setText("Mit OBS verbunden");
             status.setTextColor(ACCENT);
-            details.setText("Audio wird an "+MicService.destination+" übertragen.");
+            details.setText("WLAN verbunden • Gesendete Pakete: "+MicService.packetsSent);
         }else{
             status.setText("Sende ...");
             status.setTextColor(YELLOW);
-            details.setText("Keine Bestätigung von OBS. IP, Port, Code und Firewall prüfen.");
+            details.setText("Warte auf OBS-Bestätigung • Gesendet: "+MicService.packetsSent+" Pakete. IP, Port, Code und Firewall prüfen.");
         }
     }
     @Override protected void onResume(){super.onResume();handler.post(ticker);}
