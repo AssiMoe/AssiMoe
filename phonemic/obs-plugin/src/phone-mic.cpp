@@ -93,7 +93,7 @@ void run_receiver(PhoneMic *mic)
         closesocket(fd);
         return;
     }
-    blog(LOG_INFO, "[PhoneMic v1.1] UDP %d, Audiopuffer %d ms", mic->port, mic->buffer_ms);
+    blog(LOG_INFO, "[PhoneMic v1.2] UDP %d, Audiopuffer %d ms", mic->port, mic->buffer_ms);
 
     std::unordered_map<uint32_t, AudioBlock> queue;
     AudioBlock silence{};
@@ -139,6 +139,15 @@ void run_receiver(PhoneMic *mic)
             const int n = recvfrom(fd, reinterpret_cast<char *>(bytes.data()),
                                    static_cast<int>(bytes.size()), 0,
                                    reinterpret_cast<sockaddr *>(&sender), &sender_len);
+            if (n == 12 && std::memcmp(bytes.data(), "PMDISC01", 8) == 0 &&
+                rd32(bytes.data() + 8) == mic->code) {
+                uint8_t reply[12] = {'P','M','D','O','K','0','0','1'};
+                wr32(reply + 8, mic->code);
+                sendto(fd, reinterpret_cast<const char *>(reply), 12, 0,
+                       reinterpret_cast<const sockaddr *>(&sender), sender_len);
+                continue;
+            }
+
             if (n == static_cast<int>(PACKET_BYTES) &&
                 std::memcmp(bytes.data(), "AMIC", 4) == 0 && bytes[4] == 1 &&
                 rd16(bytes.data() + 6) == PCM_BYTES &&
@@ -340,7 +349,7 @@ bool obs_module_load(void)
     info.icon_type = OBS_ICON_TYPE_AUDIO_INPUT;
     obs_register_source(&info);
 
-    blog(LOG_INFO, "[PhoneMic v1.1] OBS-Audioquelle registriert");
+    blog(LOG_INFO, "[PhoneMic v1.2] OBS-Audioquelle registriert");
     return true;
 }
 void obs_module_unload(void)
