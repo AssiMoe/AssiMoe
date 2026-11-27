@@ -9,114 +9,222 @@ import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
-/**
- * Discovers an OBS receiver only on Android's USB-tether interfaces.
- * Existing UDP audio transport is unchanged; discovery is optional.
- */
 public final class UsbDiscovery {
     private static final byte[] REQUEST = "PMDISC01".getBytes(StandardCharsets.US_ASCII);
     private static final byte[] ANSWER = "PMDOK001".getBytes(StandardCharsets.US_ASCII);
+    private static final int MAX_TARGETS_PER_INTERFACE = 256;
+    private static final int BATCH_SIZE = 24;
+    private static final int RECV_WAIT_MS = 15;
 
     public static final class Result {
         public final String ip;
         public final String message;
-        Result(String ip, String message) {
+        public final String diagnostics;
+
+        Result(String ip, String message, String diagnostics) {
             this.ip = ip;
             this.message = message;
+            this.diagnostics = diagnostics;
         }
     }
 
     private UsbDiscovery() {}
 
-    private static boolean usbNetwork(String name) {
-        if (name == null) return false;
-        String lower = name.toLowerCase(Locale.ROOT);
-        return lower.startsWith("rndis") || lower.startsWith("usb")
-                || lower.startsWith("ncm") || lower.startsWith("tether");
+    private static boolean usbNetwork(String name, String displayName) {
+        String n = (name == null ? "" : name).toLowerCase(Locale.ROOT);
+        String display = (displayName == null ? "" : displayName).toLowerCase(Locale.ROOT);
+        // Android manufacturers use different RNDIS / NCM interface names.
+        return n.startsWith("rndis") || n.startsWith("usb") || n.startsWith("ncm")
+                || n.startsWith("tether") || n.startsWith("eth") || n.startsWith("enx")
+                || display.contains("rndis") || display.contains("tether")
+                || display.contains("usb ethernet") || display.contains("usb ncm");
     }
 
-    private static int read32(byte[] p, int o) {
-        return (p[o] & 255) | ((p[o + 1] & 255) << 8) |
-                ((p[o + 2] & 255) << 16) | ((p[o + 3] & 255) << 24);
+    private static boolean validPrivate(Inet4Address ip) {
+        byte[] b = ip.getAddress();
+        int a = b[0] & 255;
+        int c = b[1] & 255;
+        if (ip.isLoopbackAddress() || ip.isLinkLocalAddress() || ip.isMulticastAddress())
+            return false;
+        return a == 10 || (a == 172 && c >= 16 && c <= 31)
+                || (a == 192 && c == 168);
     }
 
-    private static void write32(byte[] b, int o, int n) {
-        b[o] = (byte) n;
-        b[o + 1] = (byte) (n >>> 8);
-        b[o + 2] = (byte) (n >>> 16);
-        b[o + 3] = (byte) (n >>> 24);
+    private static int toInt(Inet4Address ip) {
+        byte[] b = ip.getAddress();
+        return ((b[0] & 255) << 24) | ((b[1] & 255) << 16)
+                | ((b[2] & 255) << 8) | (b[3] & 255);
+    }
+
+    private static InetAddress fromInt(int n) throws Exception {
+        return InetAddress.getByAddress(new byte[]{
+                (byte)(n >>> 24), (byte)(n >>> 16), (byte)(n >>> 8), (byte)n
+        });
+    }
+
+    private static void write32(byte[] buffer, int off, int value) {
+        buffer[off] = (byte) value;
+        buffer[off + 1] = (byte) (value >>> 8);
+        buffer[off + 2] = (byte) (value >>> 16);
+        buffer[off + 3] = (byte) (value >>> 24);
+    }
+
+    private static int read32(byte[] b, int o) {
+        return (b[o] & 255) | ((b[o + 1] & 255) << 8)
+                | ((b[o + 2] & 255) << 16) | ((b[o + 3] & 255) << 24);
+    }
+
+    private static InetAddress receiveValid(DatagramSocket socket,
+                                             DatagramPacket response,
+                                             int port, int code, int waitMs) {
+        try {
+            response.setLength(response.getData().length);
+            socket.setSoTimeout(waitMs);
+            socket.receive(response);
+            byte[] buf = response.getData();
+            int offset = response.getOffset();
+            if (response.getLength() != 12 || response.getPort() != port)
+                return null;
+            for (int i = 0; i < ANSWER.length; i++) {
+                if (buf[offset + i] != ANSWER[i])
+                    return null;
+            }
+            if (read32(buf, offset + 8) != code)
+                return null;
+            if (!(response.getAddress() instanceof Inet4Address))
+                return null;
+            return response.getAddress();
+        } catch (SocketTimeoutException ignored) {
+            return null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static Result scanAddress(Inet4Address local,
+                                      InterfaceAddress interfaceAddress,
+                                      int port, int code, String label) {
+        int address = toInt(local);
+        int prefix = interfaceAddress.getNetworkPrefixLength();
+        if (prefix <= 0 || prefix > 30)
+            prefix = 24;
+        // A subnet larger than /24 is deliberately restricted to the local /24.
+        int effectivePrefix = Math.max(24, prefix);
+        int mask = -1 << (32 - effectivePrefix);
+        int network = address & mask;
+        int broadcast = network | ~mask;
+
+        Set<Integer> targets = new LinkedHashSet<>();
+        if (interfaceAddress.getBroadcast() instanceof Inet4Address)
+            targets.add(toInt((Inet4Address) interfaceAddress.getBroadcast()));
+        targets.add(broadcast);
+
+        // These are only priorities, not assumed PC addresses.
+        for (int suffix : new int[]{1, 2, 10, 100, 129, 254}) {
+            int candidate = (address & 0xFFFFFF00) | suffix;
+            if (candidate != address && candidate > network && candidate < broadcast)
+                targets.add(candidate);
+        }
+        for (int candidate = network + 1;
+             candidate != broadcast && targets.size() < MAX_TARGETS_PER_INTERFACE;
+             candidate++) {
+            if (candidate != address)
+                targets.add(candidate);
+        }
+
+        try (DatagramSocket socket = new DatagramSocket(new InetSocketAddress(local, 0))) {
+            socket.setBroadcast(true);
+            socket.setSendBufferSize(64 * 1024);
+            socket.setReceiveBufferSize(64 * 1024);
+            byte[] payload = new byte[12];
+            System.arraycopy(REQUEST, 0, payload, 0, REQUEST.length);
+            write32(payload, 8, code);
+            byte[] received = new byte[64];
+            DatagramPacket response = new DatagramPacket(received, received.length);
+
+            for (int pass = 0; pass < 2; pass++) {
+                int sent = 0;
+                for (Integer ip : targets) {
+                    if (Thread.currentThread().isInterrupted())
+                        return new Result(null, "USB-Suche abgebrochen.", label);
+                    InetAddress candidate = fromInt(ip);
+                    try {
+                        DatagramPacket request = new DatagramPacket(payload, payload.length, candidate, port);
+                        socket.send(request);
+                    } catch (Exception ignored) {
+                        continue;
+                    }
+                    sent++;
+                    if (sent % BATCH_SIZE == 0) {
+                        InetAddress found = receiveValid(socket, response, port, code, RECV_WAIT_MS);
+                        if (found != null)
+                            return new Result(found.getHostAddress(), "OBS-PC über USB erkannt.", label);
+                    }
+                }
+                // Give OBS enough time to answer even if its receive queue was busy.
+                for (int i = 0; i < 12; i++) {
+                    InetAddress found = receiveValid(socket, response, port, code, 40);
+                    if (found != null)
+                        return new Result(found.getHostAddress(), "OBS-PC über USB erkannt.", label);
+                }
+            }
+        } catch (Exception exc) {
+            return new Result(null, "USB-Netzwerk konnte nicht abgefragt werden.", label
+                    + ": " + exc.getClass().getSimpleName());
+        }
+        return new Result(null, "Keine OBS-Antwort auf dem USB-Netzwerk.", label);
     }
 
     public static Result discover(int port, int code) {
-        boolean interfaceFound = false;
+        List<String> networks = new ArrayList<>();
+        int scanned = 0;
         try {
-            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-            if (interfaces == null)
-                return new Result(null, "Keine Netzwerkschnittstellen verfügbar.");
+            Enumeration<NetworkInterface> all = NetworkInterface.getNetworkInterfaces();
+            if (all == null)
+                return new Result(null, "Keine Android-Netzwerkschnittstellen gefunden.", "");
 
-            while (interfaces.hasMoreElements()) {
-                NetworkInterface net = interfaces.nextElement();
-                if (!usbNetwork(net.getName()) || !net.isUp() || net.isLoopback())
+            while (all.hasMoreElements()) {
+                NetworkInterface net = all.nextElement();
+                if (!usbNetwork(net.getName(), net.getDisplayName())
+                        || !net.isUp() || net.isLoopback())
                     continue;
 
-                for (InterfaceAddress address : net.getInterfaceAddresses()) {
-                    InetAddress local = address.getAddress();
-                    InetAddress broadcast = address.getBroadcast();
-                    if (!(local instanceof Inet4Address))
+                for (InterfaceAddress entry : net.getInterfaceAddresses()) {
+                    if (!(entry.getAddress() instanceof Inet4Address))
                         continue;
-                    interfaceFound = true;
-                    if (!(broadcast instanceof Inet4Address))
+                    Inet4Address local = (Inet4Address) entry.getAddress();
+                    if (!validPrivate(local))
                         continue;
-
-                    try (DatagramSocket socket = new DatagramSocket(
-                            new InetSocketAddress(local, 0))) {
-                        socket.setBroadcast(true);
-                        socket.setSoTimeout(200);
-                        byte[] bytes = new byte[12];
-                        System.arraycopy(REQUEST, 0, bytes, 0, REQUEST.length);
-                        write32(bytes, 8, code);
-                        DatagramPacket request = new DatagramPacket(
-                                bytes, bytes.length, broadcast, port);
-                        byte[] received = new byte[64];
-                        DatagramPacket response = new DatagramPacket(received, received.length);
-
-                        for (int attempt = 0; attempt < 7; attempt++) {
-                            socket.send(request);
-                            response.setLength(received.length);
-                            try {
-                                socket.receive(response);
-                                if (response.getLength() == 12
-                                        && response.getPort() == port
-                                        && received[0] == ANSWER[0]
-                                        && received[1] == ANSWER[1]
-                                        && received[2] == ANSWER[2]
-                                        && received[3] == ANSWER[3]
-                                        && received[4] == ANSWER[4]
-                                        && received[5] == ANSWER[5]
-                                        && received[6] == ANSWER[6]
-                                        && received[7] == ANSWER[7]
-                                        && read32(received, 8) == code) {
-                                    return new Result(response.getAddress().getHostAddress(),
-                                            "OBS-PC über USB erkannt.");
-                                }
-                            } catch (SocketTimeoutException ignored) {}
-                        }
-                    } catch (Exception ignored) {
-                        // Some Android builds do not permit interface-bound broadcast.
-                        // Manual PC IPv4 entry remains available.
-                    }
+                    scanned++;
+                    String label = net.getName() + " (" + local.getHostAddress()
+                            + "/" + entry.getNetworkPrefixLength() + ")";
+                    networks.add(label);
+                    Result result = scanAddress(local, entry, port, code, label);
+                    if (result.ip != null)
+                        return result;
                 }
             }
-        } catch (Exception e) {
-            return new Result(null, "USB-Suche fehlgeschlagen. Windows-USB-IPv4 manuell eintragen.");
+        } catch (Exception exc) {
+            return new Result(null, "USB-Suche fehlgeschlagen: "
+                    + exc.getClass().getSimpleName(), String.join(", ", networks));
         }
-        if (!interfaceFound) {
-            return new Result(null, "USB-Tethering nicht erkannt. Kabel verbinden und am Handy USB-Tethering aktivieren.");
+
+        if (scanned == 0) {
+            return new Result(null,
+                    "Keine aktive USB-Netzwerkschnittstelle erkannt. USB-Tethering am Handy aktivieren.",
+                    "Android: keine RNDIS/NCM/USB-Ethernet IPv4. "
+                            + "Prüfe USB-Datenkabel und USB-Tethering.");
         }
         return new Result(null,
-                "Keine OBS-Antwort über USB. Windows-Firewall und OBS prüfen oder USB-IPv4 des PCs manuell eingeben.");
+                "USB-Netzwerk erkannt, aber OBS antwortet nicht. "
+                        + "OBS-Quelle, Port, Verbindungscode und Windows-Firewall prüfen.",
+                String.join(", ", networks));
     }
 }
