@@ -31,3 +31,13 @@ Die Suche sendet nur auf Android-USB-Netzwerkschnittstellen Discovery-Pakete und
 Windows-Firewall: Der Installer legt die Regel "PhoneMic OBS (USB/WLAN lokal)" an. Sie erlaubt eingehende UDP-Pakete auf Port 49888 **nur aus dem lokalen Subnetz**, auch wenn Windows den USB-Adapter als Oeffentlich erkennt.
 
 USB-Tethering muss aus Android-Gruenden in den Systemeinstellungen aktiviert werden. Es ist nicht garantiert, dass jeder Android-Hersteller USB-Tethering oder die automatische PC-Suche unterstuetzt. Die manuelle IP-Eingabe bleibt verfuegbar.
+
+## Automatische USB-Erkennung (Version 1.3)
+
+- Android sucht nun zuerst gezielt auf der USB-Netzwerkschnittstelle (RNDIS, USB, NCM oder USB-Ethernet).
+- Wenn Android keine Broadcast-Adresse bereitstellt, wird das lokale USB-/24-Subnetz per UDP-Unicast abgefragt. Es werden nur lokale USB-Netzadressen angesprochen.
+- Der Verbindungscode und Port werden anhand der OBS-Antwort geprüft; es wird nicht einfach irgendeine gefundene IP verwendet.
+- Bleibt die Suche erfolglos, zeigt die App die Schnittstelle, IP und konkrete Fehlermeldung unterhalb des Suchbuttons an.
+- Wenn im USB-Modus keine Ziel-IP eingetragen ist, startet ein Klick auf »Mikrofon starten« erst die PC-Suche und verbindet bei Erfolg.
+
+**Fehlersuche:** Nach Installation von Version 1.3 die Windows-Datei `USB-Diagnose.cmd` ausführen. Dort müssen ein USB-Netzwerkadapter und ein aktiver UDP-Empfänger auf Port 49888 erscheinen. In OBS muss die PhoneMic-Quelle bereits existieren und geladen sein; sonst beantwortet das Plugin keine Suchanfragen. Bei mehrfach vorhandenen PhoneMic-Quellen darf derselbe Port nur einmal gebunden werden. Falls die automatische Suche aufgrund einer Geräte- oder Windows-Firewall-Einschränkung scheitert, die vom Diagnoseprogramm angezeigte USB-IPv4-Adresse manuell in der App eintragen.
