@@ -40,7 +40,7 @@ public final class MainActivity extends Activity {
     private static final int YELLOW = Color.rgb(233,190,104);
     private static final int RED = Color.rgb(248,141,125);
     private EditText host, port, code;
-    private TextView status, details, gainLabel, transportGuide, addressLabel;
+    private TextView status, details, gainLabel, transportGuide, addressLabel, usbDiagnostics;
     private Button startButton, muteButton, usbSettingsButton, usbSearchButton;
     private Spinner mode, transport;
     private int selectedTransport = -1;
@@ -109,7 +109,7 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(22),dp(28),dp(22),dp(32));
         scroll.addView(root);
         setContentView(scroll);
-        root.addView(label("PhoneMic 1.2",32,TEXT,true));
+        root.addView(label("PhoneMic 1.3",32,TEXT,true));
         root.addView(label("Handy-Mikrofon direkt in OBS Studio",15,MUTED,false),spaced(4));
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -150,7 +150,9 @@ public final class MainActivity extends Activity {
 
         usbSearchButton = button("OBS-PC über USB automatisch suchen",ACCENT);
         root.addView(usbSearchButton,spaced(10));
-        usbSearchButton.setOnClickListener(v -> searchUsbPc());
+        usbSearchButton.setOnClickListener(v -> searchUsbPc(false));
+        usbDiagnostics = label("",12,MUTED,false);
+        root.addView(usbDiagnostics,spaced(8));
 
         host = input("192.168.178.20",prefs.getString("host_wifi",prefs.getString("host","")),false);
         port = input("49888",prefs.getString("port","49888"),true);
@@ -239,11 +241,12 @@ public final class MainActivity extends Activity {
                 : "Handy und OBS-PC müssen über dasselbe lokale Netzwerk erreichbar sein.");
         usbSettingsButton.setVisibility(usb ? View.VISIBLE : View.GONE);
         usbSearchButton.setVisibility(usb ? View.VISIBLE : View.GONE);
+        usbDiagnostics.setVisibility(usb ? View.VISIBLE : View.GONE);
         addressLabel.setText(usb ? "IPv4-Adresse des PC-USB-Netzwerkadapters" : "IPv4-Adresse deines OBS-PCs");
         host.setHint(usb ? "USB-PC automatisch suchen oder IPv4 eingeben" : "z. B. 192.168.178.20");
     }
 
-    private void searchUsbPc() {
+    private void searchUsbPc(boolean startAfterFound) {
         if (MicService.transmitting) return;
         final int p;
         final int pairing;
@@ -259,6 +262,7 @@ public final class MainActivity extends Activity {
         }
         usbSearchButton.setEnabled(false);
         usbSearchButton.setText("Suche OBS-PC am USB-Kabel ...");
+        usbDiagnostics.setText("Prüfe USB-Netzwerk und suche OBS im lokalen Subnetz ...");
         new Thread(() -> {
             UsbDiscovery.Result result = UsbDiscovery.discover(p, pairing);
             runOnUiThread(() -> {
@@ -268,6 +272,11 @@ public final class MainActivity extends Activity {
                 if (result.ip != null) {
                     host.setText(result.ip);
                     prefs.edit().putString("host_usb", result.ip).apply();
+                    usbDiagnostics.setText("Verbundenes USB-Netz: " + result.diagnostics
+                            + "\nOBS-PC: " + result.ip);
+                    if (startAfterFound) validateAndStart();
+                } else {
+                    usbDiagnostics.setText(result.message + "\n" + result.diagnostics);
                 }
                 Toast.makeText(this, result.message, Toast.LENGTH_LONG).show();
             });
@@ -275,6 +284,11 @@ public final class MainActivity extends Activity {
     }
 
     private void validateAndStart() {
+        if (transport.getSelectedItemPosition() == 1
+                && host.getText().toString().trim().isEmpty()) {
+            searchUsbPc(true);
+            return;
+        }
         try {
             String ip=host.getText().toString().trim();
             if(!ip.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}"))
